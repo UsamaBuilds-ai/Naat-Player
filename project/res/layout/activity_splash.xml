@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/splashRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_screen"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/splashGlyph"
+        android:layout_width="104dp"
+        android:layout_height="104dp"
+        android:background="@drawable/bg_play"
+        android:gravity="center"
+        android:text="♪"
+        android:textColor="@color/on_accent"
+        android:textSize="52sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/splashBrand"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:alpha="0"
+        android:letterSpacing="0.12"
+        android:text="@string/app_name"
+        android:textColor="@color/text"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/splashTagline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:alpha="0"
+        android:text="@string/tagline"
+        android:textColor="@color/text_dim"
+        android:textSize="13sp" />
+
+    <com.pulse.player.EqualizerView
+        android:id="@+id/splashVisualizer"
+        android:layout_width="190dp"
+        android:layout_height="44dp"
+        android:layout_marginTop="22dp" />
+</LinearLayout>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Naat Player</string>
+    <string name="tagline">Your offline Naat library</string>
+    <string name="empty_library">No naats found on this device</string>
+    <string name="empty_hint">Add Naat audio files to your storage, then reopen the app</string>
+    <string name="permission_needed">Media access is required to read your naats</string>
+    <string name="permission_hint">Grant media access to scan your device for naats</string>
+    <string name="video_permission_needed">Video access is required to browse your videos</string>
+    <string name="video_permission_hint">Grant video access to scan videos on your device</string>
+    <string name="grant">Grant access</string>
+    <string name="nothing_playing">Nothing playing</string>
+    <string name="open_player_hint">Tap or swipe up to open Naat Player</string>
+    <string name="video_empty">No videos found on this device</string>
+    <string name="video_empty_hint">Add a video file to your device, then refresh this tab</string>
+</resources>

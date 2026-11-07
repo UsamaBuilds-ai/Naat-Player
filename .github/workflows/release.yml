@@ -1,0 +1,93 @@
+name: Build & Release Naat Player
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # tag aur release create karne ke liye
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: |
+          $sdk = $env:ANDROID_SDK_ROOT
+          if (-not $sdk) { $sdk = $env:ANDROID_HOME }
+          & "$sdk\cmdline-tools\latest\bin\sdkmanager.bat" --licenses
+
+      - name: Import release keystore (if secret provided)
+        shell: pwsh
+        run: |
+          if ($env:KEYSTORE_BASE64) {
+            $bytes = [System.Convert]::FromBase64String($env:KEYSTORE_BASE64)
+            $outDir = Join-Path $PWD 'out'
+            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+            $ksPath = Join-Path $outDir 'release.keystore'
+            [System.IO.File]::WriteAllBytes($ksPath, $bytes)
+            Write-Host "::set-output name=ks_path::$ksPath"
+            Write-Host "::set-output name=ks_pass::$env:KEYSTORE_PASSWORD"
+            Write-Host "::set-output name=key_alias::$env:KEY_ALIAS"
+            Write-Host "::set-output name=key_pass::$env:KEY_PASSWORD"
+          } else {
+            Write-Host "No KEYSTORE_BASE64 secret — build.ps1 will auto-generate a debug keystore."
+          }
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        id: keystore
+
+      - name: Build APK (build.ps1)
+        shell: pwsh
+        run: |
+          $env:JAVA_HOME = (Get-Command java).Source.Split('\bin\java.exe')[0]
+          $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+          if ($env:KEYSTORE_BASE64) {
+            $env:KEYSTORE_PATH = "${{ steps.keystore.outputs.ks_path }}"
+            $env:KEYSTORE_PASS = "${{ steps.keystore.outputs.ks_pass }}"
+            $env:KEY_ALIAS = "${{ steps.keystore.outputs.key_alias }}"
+            $env:KEY_PASS = "${{ steps.keystore.outputs.key_pass }}"
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Find built APK
+        shell: pwsh
+        id: apk
+        run: |
+          $apk = Get-ChildItem -Path . -Filter 'NaatPlayer-*.apk' | Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "::set-output name=path::$apk"
+          Write-Host "::set-output name=name::$(Split-Path $apk -Leaf)"
+
+      - name: Create GitHub release + tag and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.9-build-${{ github.run_number }}
+          name: Naat Player v1.9 (build ${{ github.run_number }})
+          body: |
+            Auto build from commit `${{ github.sha }}`.
+
+            Download the signed APK below and install on Android.
+          files: ${{ steps.apk.outputs.path }}
+          make_latest: true
+          generate_release_notes: false
