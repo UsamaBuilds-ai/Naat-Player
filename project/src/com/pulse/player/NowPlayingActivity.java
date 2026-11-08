@@ -80,7 +80,7 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
 
         engine = PlayerEngine.get();
         engine.attach(this);
-        artLoader = new AlbumArtLoader();
+        artLoader = new AlbumArtLoader(this);
 
         bindViews();
         paintTheme();

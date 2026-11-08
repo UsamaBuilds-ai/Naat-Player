@@ -1,5 +1,6 @@
 package com.pulse.player;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadataRetriever;
@@ -34,6 +35,11 @@ public class AlbumArtLoader {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Context appContext;
+
+    public AlbumArtLoader(Context context) {
+        this.appContext = context == null ? null : context.getApplicationContext();
+    }
 
     private static String key(long id, int targetPx) {
         int bucket = targetPx <= 0 ? 64 : Integer.highestOneBit(targetPx);
@@ -108,6 +114,10 @@ public class AlbumArtLoader {
     }
 
     private Bitmap readArt(Song song, int targetPx) {
+        if (appContext != null) {
+            Bitmap override = ArtworkStore.load(appContext, song.id, targetPx);
+            if (override != null) return override;
+        }
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(song.path);

@@ -50,7 +50,7 @@ public class PlaylistActivity extends Activity implements PlayerEngine.Listener 
 
         engine = PlayerEngine.get();
         engine.attach(this);
-        artLoader = new AlbumArtLoader();
+        artLoader = new AlbumArtLoader(this);
 
         listView = findViewById(R.id.playlistList);
         title = findViewById(R.id.headerTitle);

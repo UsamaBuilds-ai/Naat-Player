@@ -11,8 +11,13 @@ public final class Artwork {
     private Artwork() {
     }
 
-    public static Bitmap load(Song song, int targetPx) {
-        if (song == null || song.path == null) return null;
+    /** Loads embedded album art as a bitmap, for the notification and lock screen.
+     *  Checks the user's cover override first, then the embedded ID3 artwork. */
+    public static Bitmap load(Context context, Song song, int targetPx) {
+        if (song == null) return null;
+        Bitmap override = ArtworkStore.load(context, song.id, targetPx);
+        if (override != null) return override;
+        if (song.path == null) return null;
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(song.path);

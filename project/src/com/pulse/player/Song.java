@@ -11,9 +11,15 @@ public class Song {
     public final long durationMs;
     public final long dateAdded;
     public final String path;
+    public final String genre;
 
     public Song(long id, long albumId, String title, String artist, String album,
                 long durationMs, long dateAdded, String path) {
+        this(id, albumId, title, artist, album, durationMs, dateAdded, path, "");
+    }
+
+    public Song(long id, long albumId, String title, String artist, String album,
+                long durationMs, long dateAdded, String path, String genre) {
         this.id = id;
         this.albumId = albumId;
         this.title = title;
@@ -22,6 +28,7 @@ public class Song {
         this.durationMs = durationMs;
         this.dateAdded = dateAdded;
         this.path = path;
+        this.genre = genre == null ? "" : genre;
     }
 
     public String folder() {

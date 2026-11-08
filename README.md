@@ -13,13 +13,22 @@ Ek **original, from-scratch** Android music/nait player (~4,600 lines Java, bina
 | **Settings** | Scan library, Hidden music, show hidden items, dot-folders, theme, sort, equalizer, **lyrics language / online / Urdu translate**, headphone pause, keep screen on, sleep timer, version, **export/import backup**, **clear recently played** |
 | **Hidden naats** | Hidden naats + hidden folders, dono ki alag tab, tap = unhide |
 | **Equalizer** | System 5-band EQ (audio session bound) + presets — settings save aur gaana badalne par apne aap lagte hain |
-| **Theme dialog** | 4 colour cards (Sky blue default, Midnight violet, Sunset, Emerald) — naam nahi, sirf rang |
+| **Tag editor** | Title/artist/album/genre edit (MediaStore write request); long-press Naat → Edit tags; long-press Album → Edit album |
+| **Theme dialog** | 4 colour cards + saved custom themes — naam nahi, sirf rang |
 | **Queue** | Live play queue — tap to play, long-press to remove, clear all |
 | **Playlist** | Playlist details — play all, open/rename/delete playlist, remove naats |
 
-## Features (v2.0)
+## Features (v2.1)
 
-- MediaStore Naat library (`IS_MUSIC != 0`), album art via `MediaMetadataRetriever` + LRU cache
+- MediaStore Naat library (`IS_MUSIC != 0`), album art via `MediaMetadataRetriever` + size-aware LRU cache
+- **SQLite** single store — favourites, hidden naats/folders, rename overrides, playlists, recent playback; one-time import of the old prefs/JSON stores
+- **Home-screen widgets** — 4x1 (art + transport) and 4x2 (bigger art + progress); pinned from Settings
+- **Genres tab** — naats grouped by genre; tap to filter
+- **Tag editor** — title/artist/album/genre per naat; album mode edits the whole album; user cover art stored app-privately and used everywhere
+- **Custom themes** — pick background gradient + accent, everything else derived; save/delete your own themes; stock colour cards stay
+- **Crossfade** — fade out the ending naat, fade in the next (toggleable in Settings)
+- **Scan progress** — library scan in the background; a dialog appears only for slow scans
+- **Recent searches** — last searches live under the search bar when it's empty; one tap to re-run
 - Search: Naat title / artist / album / folder name, plus video filename
 - Tabs: Naats, Albums, Artists, Folders, Videos — group pe tap = us album/artist/folder ka filter
 - **Animated Naat Player splash** on launch, phir library khulti hai

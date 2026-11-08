@@ -28,7 +28,8 @@ public final class Library {
                     MediaStore.Audio.Media.ALBUM,
                     MediaStore.Audio.Media.DURATION,
                     MediaStore.Audio.Media.DATE_ADDED,
-                    MediaStore.Audio.Media.DATA
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.GENRE
             };
             Cursor cursor = resolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -42,6 +43,12 @@ public final class Library {
                     String path = cursor.getString(7);
                     if (path == null) continue;
                     String title = cursor.getString(2);
+                    String genre = "";
+                    try {
+                        genre = text(cursor.getString(8), "");
+                    } catch (Throwable ignored) {
+                        // Some devices cannot return MediaStore.Audio.Media.GENRE.
+                    }
                     songs.add(new Song(
                             cursor.getLong(0), cursor.getLong(1),
                             text(title, fileName(path)),
@@ -49,7 +56,8 @@ public final class Library {
                             text(cursor.getString(4), ""),
                             cursor.getLong(5),
                             cursor.getLong(6) * 1000L,
-                            path));
+                            path,
+                            genre));
                 }
                 cursor.close();
             }

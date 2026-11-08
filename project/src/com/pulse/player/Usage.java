@@ -14,7 +14,7 @@ import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Recently played songs and play counters, kept in a small JSON file. */
+/** Recently played songs and play counters. SQLite-backed; legacy usage.json migrated once. */
 public final class Usage {
 
     private static final String FILE = "usage.json";
@@ -24,6 +24,14 @@ public final class Usage {
     private Usage() {
     }
 
+    private static boolean migrated(Context context) {
+        try {
+            return NaatDb.get(context).isMigrated();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static File file(Context context) {
         return new File(context.getFilesDir(), FILE);
     }
@@ -31,6 +39,10 @@ public final class Usage {
     public static void markPlayed(Context context, long songId) {
         if (context == null) return;
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).markPlayed(songId);
+                return;
+            }
             List<Long> ids = read(context);
             ids.remove(songId);
             ids.add(0, songId);
@@ -40,19 +52,31 @@ public final class Usage {
     }
 
     public static List<Long> recent(Context context) {
+        if (context == null) return new ArrayList<>();
         synchronized (LOCK) {
+            if (migrated(context)) return NaatDb.get(context).recent();
             return read(context);
         }
     }
 
     public static void clear(Context context) {
+        if (context == null) return;
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).clearRecent();
+                return;
+            }
             write(context, new ArrayList<Long>());
         }
     }
 
     static void replaceAll(Context context, List<Long> ids) {
+        if (context == null) return;
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).replaceRecent(ids);
+                return;
+            }
             List<Long> copy = new ArrayList<>(ids);
             while (copy.size() > LIMIT) copy.remove(copy.size() - 1);
             write(context, copy);

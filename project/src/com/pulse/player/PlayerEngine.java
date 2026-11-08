@@ -51,6 +51,7 @@ public class PlayerEngine {
     private BroadcastReceiver noisyReceiver;
 
     private MediaPlayer player;
+    private MediaPlayer fadingOut;
     private Song current;
     private boolean shuffle;
     private int repeatMode = REPEAT_ALL;
@@ -229,7 +230,44 @@ public class PlayerEngine {
     private void startSong(final Song song, boolean startImmediately, int position,
                            boolean recordUsage, boolean ensureService) {
         if (song == null) return;
-        release();
+
+        // Crossfade only on explicit play requests that start immediately;
+        // restore-playback and error recovery stay instant.
+        boolean fade = context != null && Prefs.crossfade(context)
+                && startImmediately && player != null;
+
+        MediaPlayer oldPlayer = player;
+        player = null;
+
+        if (fade && oldPlayer != null) {
+            if (fadingOut != null) {
+                try {
+                    fadingOut.stop();
+                } catch (Throwable ignored) {
+                }
+                fadingOut.release();
+            }
+            fadingOut = oldPlayer;
+            fadeVolume(oldPlayer, 1f, 0f, FADE_MS, true);
+        } else {
+            if (fadingOut != null) {
+                try {
+                    fadingOut.stop();
+                } catch (Throwable ignored) {
+                }
+                fadingOut.release();
+                fadingOut = null;
+            }
+            if (oldPlayer != null) {
+                try {
+                    oldPlayer.stop();
+                } catch (Throwable ignored) {
+                }
+                oldPlayer.release();
+            }
+        }
+        releaseEqualizer();
+
         player = new MediaPlayer();
         player.setAudioStreamType(AudioManager.STREAM_MUSIC);
         player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
@@ -255,6 +293,7 @@ public class PlayerEngine {
             player.setDataSource(song.path);
             player.prepare();
             if (position > 0) player.seekTo(position);
+            if (fade) player.setVolume(0f, 0f);
             if (startImmediately) player.start();
         } catch (Exception e) {
             release();
@@ -263,6 +302,8 @@ public class PlayerEngine {
             notifyChanged();
             return;
         }
+
+        if (fade && player != null) fadeVolume(player, 0f, 1f, FADE_MS, false);
 
         current = song;
         if (startImmediately) requestFocus();
@@ -587,12 +628,14 @@ public class PlayerEngine {
     }
 
     public void release() {
-        if (equalizer != null) {
+        releaseEqualizer();
+        if (fadingOut != null) {
             try {
-                equalizer.release();
-            } catch (Exception ignored) {
+                fadingOut.stop();
+            } catch (Throwable ignored) {
             }
-            equalizer = null;
+            fadingOut.release();
+            fadingOut = null;
         }
         if (player != null) {
             try {
@@ -602,6 +645,49 @@ public class PlayerEngine {
             player.release();
             player = null;
         }
+    }
+
+    private void releaseEqualizer() {
+        if (equalizer == null) return;
+        try {
+            equalizer.release();
+        } catch (Exception ignored) {
+        }
+        equalizer = null;
+    }
+
+    private static final long FADE_MS = 900L;
+
+    private void fadeVolume(final MediaPlayer target, final float from, final float to,
+                            final long durationMs, final boolean releaseWhenDone) {
+        if (target == null) return;
+        final long steps = Math.max(1, durationMs / 50);
+        ui.postDelayed(new Runnable() {
+            long step;
+
+            @Override
+            public void run() {
+                step++;
+                float t = Math.min(1f, step / (float) steps);
+                float v = from + (to - from) * t;
+                try {
+                    target.setVolume(v, v);
+                } catch (Throwable ignored) {
+                }
+                if (t < 1f) {
+                    ui.postDelayed(this, 50);
+                    return;
+                }
+                if (releaseWhenDone) {
+                    try {
+                        target.stop();
+                    } catch (Throwable ignored) {
+                    }
+                    target.release();
+                    if (fadingOut == target) fadingOut = null;
+                }
+            }
+        }, 50);
     }
 
     // ------------------------------------------------------------------ modes

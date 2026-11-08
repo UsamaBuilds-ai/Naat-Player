@@ -58,14 +58,33 @@ public class Theme {
 
     public static final Theme[] ALL = {SKY, MIDNIGHT, SUNSET, EMERALD};
 
+    public static Theme of(String key, String label,
+                           int bgTop, int bgBottom,
+                           int cardTop, int cardBottom, int cardStroke,
+                           int accent, int accentSoft, int onAccent,
+                           int text, int textDim) {
+        return new Theme(key, label, bgTop, bgBottom, cardTop, cardBottom, cardStroke,
+                accent, accentSoft, onAccent, text, textDim);
+    }
+
     private static final String PREFS = "pulse_prefs";
     private static final String KEY_THEME = "theme_key";
 
     public static Theme current(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String key = prefs.getString(KEY_THEME, SKY.key);
-        for (Theme theme : ALL) {
-            if (theme.key.equals(key)) return theme;
+        return fromKey(context, key);
+    }
+
+    public static Theme fromKey(Context context, String key) {
+        if (key != null && key.startsWith("custom:")) {
+            Theme custom = CustomTheme.find(context, key);
+            if (custom != null) return custom;
+        }
+        if (key != null) {
+            for (Theme theme : ALL) {
+                if (theme.key.equals(key)) return theme;
+            }
         }
         return SKY;
     }

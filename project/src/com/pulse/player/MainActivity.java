@@ -13,10 +13,13 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.KeyEvent;
+import android.view.inputmethod.EditorInfo;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.View;
 import android.view.WindowManager;
@@ -56,6 +59,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private static final int TAB_ARTISTS = 2;
     private static final int TAB_FOLDERS = 3;
     private static final int TAB_VIDEOS = 4;
+    private static final int TAB_GENRES = 5;
 
     private static final int MODE_ALL = 0;
     private static final int MODE_FAVOURITES = 1;
@@ -69,6 +73,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private final List<GroupAdapter.Group> albums = new ArrayList<>();
     private final List<GroupAdapter.Group> artists = new ArrayList<>();
     private final List<GroupAdapter.Group> folders = new ArrayList<>();
+    private final List<GroupAdapter.Group> genres = new ArrayList<>();
     private final List<GroupAdapter.Group> playlistGroups = new ArrayList<>();
     private final Map<Long, Song> songById = new HashMap<>();
     private final Map<Long, Song> pendingRenamedSongs = new HashMap<>();
@@ -102,6 +107,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private TextView tabArtists;
     private TextView tabFolders;
     private TextView tabVideos;
+    private TextView tabGenres;
     private TextView btnFavourite;
     private TextView btnRecent;
     private TextView btnPlaylists;
@@ -112,11 +118,14 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private View nowArt;
     private SeekBar seekBar;
     private EditText searchInput;
+    private View recentSearchScroll;
+    private LinearLayout recentSearchRow;
 
     private int tab = TAB_SONGS;
     private int mode = MODE_ALL;
     private int hiddenCount;
     private String folderFilter;
+    private String genreFilter;
     private boolean dragging;
     private boolean askedNotifications;
     private Song pendingMediaSong;
@@ -139,7 +148,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
 
         engine = PlayerEngine.get();
         engine.attach(this);
-        artLoader = new AlbumArtLoader();
+        artLoader = new AlbumArtLoader(this);
 
         bindViews();
         paintTheme();
@@ -183,6 +192,15 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                     GroupAdapter.Group group = folders.get(position);
                     if (group.songs.isEmpty()) return;
                     folderFilter = group.songs.get(0).folder();
+                    genreFilter = null;
+                    searchInput.setText("");
+                    selectTab(TAB_SONGS);
+                } else if (tab == TAB_GENRES) {
+                    if (position < 0 || position >= genres.size()) return;
+                    GroupAdapter.Group group = genres.get(position);
+                    if (group.songs.isEmpty()) return;
+                    genreFilter = group.songs.get(0).genre;
+                    folderFilter = null;
                     searchInput.setText("");
                     selectTab(TAB_SONGS);
                 } else {
@@ -211,6 +229,10 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 } else if (tab == TAB_FOLDERS) {
                     if (position >= 0 && position < folders.size()) {
                         showFolderActions(folders.get(position));
+                    }
+                } else if (tab == TAB_ALBUMS) {
+                    if (position >= 0 && position < albums.size()) {
+                        showAlbumActions(albums.get(position));
                     }
                 }
                 return true;
@@ -243,6 +265,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         tabArtists = findViewById(R.id.tabArtists);
         tabFolders = findViewById(R.id.tabFolders);
         tabVideos = findViewById(R.id.tabVideos);
+        tabGenres = findViewById(R.id.tabGenres);
         btnFavourite = findViewById(R.id.btnFavourite);
         btnRecent = findViewById(R.id.btnRecent);
         btnPlaylists = findViewById(R.id.btnPlaylists);
@@ -253,6 +276,8 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         nowArtGlyph = findViewById(R.id.nowArtGlyph);
         seekBar = findViewById(R.id.seekBar);
         searchInput = findViewById(R.id.searchInput);
+        recentSearchScroll = findViewById(R.id.recentSearchScroll);
+        recentSearchRow = findViewById(R.id.recentSearchRow);
     }
 
     private void wireControls() {
@@ -333,15 +358,23 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 paintLibraryModes();
                 if (id == R.id.tabAlbums) {
                     folderFilter = null;
+                    genreFilter = null;
                     selectTab(TAB_ALBUMS);
                 } else if (id == R.id.tabArtists) {
                     folderFilter = null;
+                    genreFilter = null;
                     selectTab(TAB_ARTISTS);
                 } else if (id == R.id.tabFolders) {
                     folderFilter = null;
+                    genreFilter = null;
                     selectTab(TAB_FOLDERS);
+                } else if (id == R.id.tabGenres) {
+                    folderFilter = null;
+                    genreFilter = null;
+                    selectTab(TAB_GENRES);
                 } else {
                     folderFilter = null;
+                    genreFilter = null;
                     selectTab(TAB_SONGS);
                 }
             }
@@ -350,6 +383,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         tabAlbums.setOnClickListener(tabClick);
         tabArtists.setOnClickListener(tabClick);
         tabFolders.setOnClickListener(tabClick);
+        tabGenres.setOnClickListener(tabClick);
         tabVideos.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -358,6 +392,20 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 selectTab(TAB_VIDEOS);
                 if (hasVideoPermission()) loadVideos();
                 else showVideoPermissionState();
+            }
+        });
+
+        searchInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_SEARCH
+                        || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                    String query = searchInput.getText().toString().trim();
+                    Prefs.addRecentSearch(MainActivity.this, query);
+                    applyFilter(query);
+                    return true;
+                }
+                return false;
             }
         });
 
@@ -464,6 +512,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         tabAlbums.setTextColor(all && tab == TAB_ALBUMS ? active : idle);
         tabArtists.setTextColor(all && tab == TAB_ARTISTS ? active : idle);
         tabFolders.setTextColor(all && tab == TAB_FOLDERS ? active : idle);
+        tabGenres.setTextColor(all && tab == TAB_GENRES ? active : idle);
         tabVideos.setTextColor(all && tab == TAB_VIDEOS ? active : idle);
     }
 
@@ -492,6 +541,63 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         dialog.show();
     }
 
+    private void paintRecentSearches(String query) {
+        boolean show = query == null || query.trim().isEmpty();
+        if (!show) {
+            recentSearchScroll.setVisibility(View.GONE);
+            return;
+        }
+        java.util.List<String> searches = Prefs.recentSearches(this);
+        recentSearchRow.removeAllViews();
+        if (searches.isEmpty()) {
+            recentSearchScroll.setVisibility(View.GONE);
+            return;
+        }
+        for (final String search : searches) {
+            TextView chip = new TextView(this);
+            chip.setText("◷  " + search);
+            chip.setTextColor(theme.textDim);
+            chip.setTextSize(11);
+            chip.setSingleLine(true);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setPadding(dp(12), dp(6), dp(12), dp(6));
+            chip.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x14000000, 15, theme.cardStroke));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.rightMargin = dp(6);
+            chip.setLayoutParams(params);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    searchInput.setText(search);
+                    searchInput.setSelection(search.length());
+                }
+            });
+            recentSearchRow.addView(chip);
+        }
+        TextView clear = new TextView(this);
+        clear.setText("✕");
+        clear.setTextColor(theme.textDim);
+        clear.setTextSize(12);
+        clear.setPadding(dp(12), dp(6), dp(12), dp(6));
+        clear.setBackground(Ui.round(0x14000000, 15, 0));
+        clear.setContentDescription("Clear recent searches");
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Prefs.clearRecentSearches(MainActivity.this);
+                paintRecentSearches(searchInput.getText().toString());
+            }
+        });
+        recentSearchRow.addView(clear);
+        recentSearchScroll.setVisibility(View.VISIBLE);
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
     // ------------------------------------------------------------------ tabs
 
     private void selectTab(int which) {
@@ -502,7 +608,8 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             listView.setAdapter(videoAdapter);
         } else {
             List<GroupAdapter.Group> groups = tab == TAB_ALBUMS ? albums
-                    : tab == TAB_ARTISTS ? artists : folders;
+                    : tab == TAB_ARTISTS ? artists
+                    : tab == TAB_GENRES ? genres : folders;
             groupAdapter = new GroupAdapter(this, groups, theme);
             listView.setAdapter(groupAdapter);
         }
@@ -542,6 +649,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         mode = newMode;
         if (mode == MODE_FAVOURITES || mode == MODE_RECENT) {
             folderFilter = null;
+            genreFilter = null;
             tab = TAB_SONGS;
         }
 
@@ -555,7 +663,8 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             listView.setAdapter(videoAdapter);
         } else {
             List<GroupAdapter.Group> groups = tab == TAB_ALBUMS ? albums
-                    : tab == TAB_ARTISTS ? artists : folders;
+                    : tab == TAB_ARTISTS ? artists
+                    : tab == TAB_GENRES ? genres : folders;
             groupAdapter = new GroupAdapter(this, groups, theme);
             listView.setAdapter(groupAdapter);
         }
@@ -743,9 +852,41 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         }
     }
 
-    /** Loads the library and drops hidden songs / hidden folders unless the user asked to see them. */
+    /**
+     * Loads the library and drops hidden songs / hidden folders unless the user asked to see them.
+     * The MediaStore scan runs in the background; a dialog appears only for slow scans.
+     */
     private void loadSongs() {
-        List<Song> loaded = Library.load(this);
+        final android.app.AlertDialog scanning = new android.app.AlertDialog.Builder(this)
+                .setTitle("Scanning library…")
+                .setMessage("Reading your naats from storage")
+                .setCancelable(false)
+                .create();
+        final boolean[] finished = {false};
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!finished[0] && !scanning.isShowing()) scanning.show();
+            }
+        }, 400);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<Song> loaded = Library.load(MainActivity.this);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        finished[0] = true;
+                        applyLoadedSongs(loaded);
+                        if (scanning.isShowing()) scanning.dismiss();
+                    }
+                });
+            }
+        }, "library-scan").start();
+    }
+
+    private void applyLoadedSongs(List<Song> loaded) {
         reconcilePendingMediaChanges(loaded);
         applyRenamedTitles(loaded);
         allSongs.clear();
@@ -779,6 +920,18 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             if (!stillThere) folderFilter = null;
         }
 
+        if (genreFilter != null) {
+            String want = genreFilter;
+            boolean stillThere = false;
+            for (Song song : allSongs) {
+                if (equalsIgnoreCase(song.genre, want)) {
+                    stillThere = true;
+                    break;
+                }
+            }
+            if (!stillThere) genreFilter = null;
+        }
+
         songById.clear();
         for (Song song : allSongs) songById.put(song.id, song);
         recentIds.clear();
@@ -797,9 +950,15 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             String nick = Prefs.renamedTitle(this, song.id);
             if (nick != null && !nick.equals(song.title)) {
                 loaded.set(i, new Song(song.id, song.albumId, nick, song.artist,
-                        song.album, song.durationMs, song.dateAdded, song.path));
+                        song.album, song.durationMs, song.dateAdded, song.path, song.genre));
             }
         }
+    }
+
+    private static boolean equalsIgnoreCase(String a, String b) {
+        if (a == null) a = "";
+        if (b == null) b = "";
+        return a.trim().equalsIgnoreCase(b.trim());
     }
 
     private static boolean hasDotSegment(String path) {
@@ -814,6 +973,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         Map<String, GroupAdapter.Group> albumMap = new LinkedHashMap<>();
         Map<String, GroupAdapter.Group> artistMap = new LinkedHashMap<>();
         Map<String, GroupAdapter.Group> folderMap = new LinkedHashMap<>();
+        Map<String, GroupAdapter.Group> genreMap = new LinkedHashMap<>();
 
         for (Song song : allSongs) {
             String albumKey = song.album.isEmpty() ? "Unknown album" : song.album;
@@ -840,6 +1000,15 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 folderMap.put(folderPath, folder);
             }
             folder.songs.add(song);
+
+            String genreKey = song.genre == null || song.genre.trim().isEmpty()
+                    ? "Unknown genre" : song.genre.trim();
+            GroupAdapter.Group genre = genreMap.get(genreKey);
+            if (genre == null) {
+                genre = new GroupAdapter.Group(genreKey, "Genre");
+                genreMap.put(genreKey, genre);
+            }
+            genre.songs.add(song);
         }
 
         albums.clear();
@@ -850,6 +1019,21 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
 
         folders.clear();
         folders.addAll(folderMap.values());
+
+        genres.clear();
+        genres.addAll(genreMap.values());
+
+        List<GroupAdapter.Group> orderedGenres = new ArrayList<>(genres);
+        Collections.sort(orderedGenres, new Comparator<GroupAdapter.Group>() {
+            @Override
+            public int compare(GroupAdapter.Group a, GroupAdapter.Group b) {
+                if ("Unknown genre".equalsIgnoreCase(a.title)) return 1;
+                if ("Unknown genre".equalsIgnoreCase(b.title)) return -1;
+                return a.title.compareToIgnoreCase(b.title);
+            }
+        });
+        genres.clear();
+        genres.addAll(orderedGenres);
 
         // Folder rows are ordered by name like the rest of the library.
         List<GroupAdapter.Group> ordered = new ArrayList<>(folders);
@@ -864,6 +1048,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     }
 
     private void applyFilter(String query) {
+        paintRecentSearches(query);
         if (tab == TAB_VIDEOS && mode == MODE_ALL) {
             if (!hasVideoPermission()) {
                 showVideoPermissionState();
@@ -890,6 +1075,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             for (Song song : allSongs) {
                 if (mode == MODE_FAVOURITES && !Prefs.isFavorite(this, song.id)) continue;
                 if (folderFilter != null && !folderFilter.equals(song.folder())) continue;
+                if (genreFilter != null && !equalsIgnoreCase(song.genre, genreFilter)) continue;
                 if (song.matches(query)) visibleSongs.add(song);
             }
         }
@@ -930,6 +1116,9 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 int slash = name.lastIndexOf('/');
                 if (slash >= 0) name = name.substring(slash + 1);
                 songCount.setText(String.format(Locale.US, "%d in %s", visibleSongs.size(), name));
+            } else if (genreFilter != null) {
+                songCount.setText(String.format(Locale.US, "%d in %s", visibleSongs.size(),
+                        genreFilter.isEmpty() ? "Unknown genre" : genreFilter));
             } else {
                 songCount.setText(String.format(Locale.US, "%d%s", visibleSongs.size(),
                         filtered ? " found" : " naats"));
@@ -937,9 +1126,11 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         } else {
             songCount.setText(String.format(Locale.US, "%d %s",
                     tab == TAB_ALBUMS ? albums.size()
-                            : tab == TAB_ARTISTS ? artists.size() : folders.size(),
+                            : tab == TAB_ARTISTS ? artists.size()
+                            : tab == TAB_GENRES ? genres.size() : folders.size(),
                     tab == TAB_ALBUMS ? "albums"
-                            : tab == TAB_ARTISTS ? "artists" : "folders"));
+                            : tab == TAB_ARTISTS ? "artists"
+                            : tab == TAB_GENRES ? "genres" : "folders"));
         }
 
         boolean empty = visibleSongs.isEmpty();
@@ -978,6 +1169,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
 
         List<String> options = new ArrayList<>();
         options.add(favourite ? "Remove from Favourites" : "Add to Favourites");
+        options.add("Edit tags…");
         options.add("Add to playlist…");
         options.add("Play next");
         options.add("Add to queue");
@@ -1004,6 +1196,11 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                                     added ? "Added to Favourites" : "Removed from Favourites",
                                     Toast.LENGTH_SHORT).show();
                             if (mode == MODE_FAVOURITES) applyFilter(searchInput.getText().toString());
+                        } else if (choice.startsWith("Edit tags")) {
+                            Intent intent = new Intent(MainActivity.this, TagsActivity.class);
+                            intent.putExtra(TagsActivity.EXTRA_MODE, "song");
+                            intent.putExtra(TagsActivity.EXTRA_SONG_ID, song.id);
+                            startActivity(intent);
                         } else if (choice.startsWith("Add to playlist")) {
                             showAddToPlaylist(song);
                         } else if (choice.startsWith("Play next")) {
@@ -1395,6 +1592,24 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         buildPlaylistGroups();
         if (groupAdapter != null) groupAdapter.notifyDataSetChanged();
         applyFilter(searchInput.getText().toString());
+    }
+
+    private void showAlbumActions(final GroupAdapter.Group group) {
+        if (group.songs.isEmpty()) return;
+        String[] items = {"Edit album…"};
+        new AlertDialog.Builder(this)
+                .setTitle(group.title)
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent intent = new Intent(MainActivity.this, TagsActivity.class);
+                        intent.putExtra(TagsActivity.EXTRA_MODE, "album");
+                        intent.putExtra(TagsActivity.EXTRA_ALBUM, group.title);
+                        startActivity(intent);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void showFolderActions(GroupAdapter.Group group) {

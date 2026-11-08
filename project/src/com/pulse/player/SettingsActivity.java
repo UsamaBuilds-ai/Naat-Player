@@ -138,6 +138,21 @@ public class SettingsActivity extends Activity {
                         Prefs.setKeepScreenOn(SettingsActivity.this, checked);
                     }
                 });
+        toggle("Crossfade", "Fade the ending naat out and the next one in",
+                Prefs.crossfade(this), new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton button, boolean checked) {
+                        Prefs.setCrossfade(SettingsActivity.this, checked);
+                    }
+                });
+        section("Widgets");
+        item("Add widget", "Pin a Naat Player widget to the home screen",
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        pinWidget();
+                    }
+                });
         item("Sleep timer", sleepSummary(), new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -189,8 +204,28 @@ public class SettingsActivity extends Activity {
                 });
 
         section("About");
-        item("Version", "Naat Player 2.0", null);
+        item("Version", "Naat Player 2.1", null);
         item("Lyrics", "Local .lrc or embedded USLT first, online as a fallback", null);
+    }
+
+    private void pinWidget() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+            Toast.makeText(this, "Long-press your home screen and add the Naat Player widget",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        android.appwidget.AppWidgetManager manager =
+                android.appwidget.AppWidgetManager.getInstance(this);
+        android.content.ComponentName provider =
+                new android.content.ComponentName(this, Widget4x1Provider.class);
+        if (manager.isRequestPinAppWidgetSupported()) {
+            manager.requestPinAppWidget(provider, null, null);
+            Toast.makeText(this, "Widgets are in your home screen widget picker",
+                    Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Long-press your home screen and add the Naat Player widget",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private String sleepSummary() {

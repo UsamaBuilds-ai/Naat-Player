@@ -60,7 +60,7 @@ jobs:
         run: |
           $code = 100 + [int]$env:GITHUB_RUN_NUMBER
           "VERSION_CODE=$code" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "VERSION_NAME=2.0.0-ci.$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VERSION_NAME=2.1.0-ci.$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build APK
         shell: pwsh

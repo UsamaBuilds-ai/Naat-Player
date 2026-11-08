@@ -14,7 +14,7 @@ import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.List;
 
-/** User playlists, stored as a small JSON file in the app's private storage. */
+/** User playlists. Stored in SQLite; the legacy playlists.json import is once-only. */
 public final class Playlists {
 
     public static class Playlist {
@@ -32,19 +32,28 @@ public final class Playlists {
     private Playlists() {
     }
 
+    private static boolean migrated(Context context) {
+        try {
+            return NaatDb.get(context).isMigrated();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static File file(Context context) {
         return new File(context.getFilesDir(), FILE);
     }
 
     public static List<Playlist> all(Context context) {
         synchronized (LOCK) {
+            if (migrated(context)) return NaatDb.get(context).allPlaylists();
             return read(context);
         }
     }
 
     public static Playlist find(Context context, String name) {
         synchronized (LOCK) {
-            for (Playlist playlist : read(context)) {
+            for (Playlist playlist : all(context)) {
                 if (playlist.name.equals(name)) return playlist;
             }
             return null;
@@ -54,11 +63,13 @@ public final class Playlists {
     public static boolean create(Context context, String name) {
         synchronized (LOCK) {
             if (name == null || name.trim().isEmpty()) return false;
+            String clean = name.trim();
+            if (migrated(context)) return NaatDb.get(context).createPlaylist(clean);
             List<Playlist> list = read(context);
             for (Playlist playlist : list) {
-                if (playlist.name.equalsIgnoreCase(name.trim())) return false;
+                if (playlist.name.equalsIgnoreCase(clean)) return false;
             }
-            list.add(new Playlist(name.trim()));
+            list.add(new Playlist(clean));
             write(context, list);
             return true;
         }
@@ -66,6 +77,10 @@ public final class Playlists {
 
     public static void delete(Context context, String name) {
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).deletePlaylist(name);
+                return;
+            }
             List<Playlist> list = read(context);
             for (int i = list.size() - 1; i >= 0; i--) {
                 if (list.get(i).name.equals(name)) list.remove(i);
@@ -77,14 +92,19 @@ public final class Playlists {
     public static boolean rename(Context context, String from, String to) {
         synchronized (LOCK) {
             if (to == null || to.trim().isEmpty()) return false;
+            if (migrated(context)) {
+                return NaatDb.get(context).renamePlaylist(from, to.trim());
+            }
+            String clean = to.trim();
             List<Playlist> list = read(context);
             for (Playlist playlist : list) {
-                if (playlist.name.equalsIgnoreCase(to.trim())
-                        && !playlist.name.equals(from)) return false;
+                if (playlist.name.equalsIgnoreCase(clean) && !playlist.name.equals(from)) {
+                    return false;
+                }
             }
             for (Playlist playlist : list) {
                 if (playlist.name.equals(from)) {
-                    playlist.name = to.trim();
+                    playlist.name = clean;
                     write(context, list);
                     return true;
                 }
@@ -95,6 +115,7 @@ public final class Playlists {
 
     public static boolean addSong(Context context, String name, long songId) {
         synchronized (LOCK) {
+            if (migrated(context)) return NaatDb.get(context).addToPlaylist(name, songId);
             List<Playlist> list = read(context);
             for (Playlist playlist : list) {
                 if (!playlist.name.equals(name)) continue;
@@ -109,6 +130,10 @@ public final class Playlists {
 
     public static void removeSong(Context context, String name, long songId) {
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).removeFromPlaylist(name, songId);
+                return;
+            }
             List<Playlist> list = read(context);
             for (Playlist playlist : list) {
                 if (!playlist.name.equals(name)) continue;
@@ -121,6 +146,10 @@ public final class Playlists {
 
     static void replaceAll(Context context, List<Playlist> list) {
         synchronized (LOCK) {
+            if (migrated(context)) {
+                NaatDb.get(context).replacePlaylists(list);
+                return;
+            }
             write(context, list);
         }
     }
@@ -187,7 +216,6 @@ public final class Playlists {
             writer.close();
             writer = null;
             if (!temp.renameTo(file)) {
-                // Fall back to a direct write if the rename is refused.
                 OutputStreamWriter direct = new OutputStreamWriter(
                         new FileOutputStream(file), "UTF-8");
                 direct.write(root.toString());

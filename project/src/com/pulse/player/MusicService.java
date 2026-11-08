@@ -174,6 +174,7 @@ public class MusicService extends Service implements PlayerEngine.Listener {
         publishMetadata(song);
         publishState();
         refreshArtwork(song);
+        pushWidgets();
 
         Notification notification = buildNotification();
         if (notification == null) return;
@@ -185,6 +186,16 @@ public class MusicService extends Service implements PlayerEngine.Listener {
                     (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) manager.notify(NOTIFICATION_ID, notification);
         }
+    }
+
+    /** App Widgets are driven by the same publish path as the notification. */
+    private void pushWidgets() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                WidgetUpdater.update(MusicService.this);
+            }
+        }, "pulse-widgets").start();
     }
 
     private void publishMetadata(Song song) {
@@ -237,7 +248,7 @@ public class MusicService extends Service implements PlayerEngine.Listener {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final Bitmap loaded = Artwork.load(target, 480);
+                final Bitmap loaded = Artwork.load(MusicService.this, target, 480);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
