@@ -44,11 +44,15 @@ jobs:
           & $sdkmanager --install 'platforms;android-34' 'build-tools;34.0.0'
           if ($LASTEXITCODE -ne 0) { throw 'sdkmanager install failed' }
 
+      - name: Set CI version
+        shell: pwsh
+        run: |
+          $code = 100 + [int]$env:GITHUB_RUN_NUMBER
+          "VERSION_CODE=$code" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VERSION_NAME=1.9.0-ci.$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build APK
         shell: pwsh
-        env:
-          VERSION_NAME: '1.9.0'
-          VERSION_CODE: ${{ 100 + github.run_number }}
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
           if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed with exit code $LASTEXITCODE" }
