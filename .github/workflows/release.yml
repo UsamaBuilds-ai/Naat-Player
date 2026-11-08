@@ -127,6 +127,7 @@ jobs:
           $apk = '${{ steps.prep.outputs.apk }}'
           $sdk = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { $env:ANDROID_HOME }
           $bt = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory |
+                Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
                 Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 
           $output = & (Join-Path $bt.FullName 'apksigner.bat') verify --print-certs $apk 2>&1
