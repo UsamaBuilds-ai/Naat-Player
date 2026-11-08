@@ -8,17 +8,21 @@ $sdk = $env:ANDROID_SDK_ROOT
 if (-not $sdk) { $sdk = $env:ANDROID_HOME }
 if (-not $sdk) { $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
 $buildToolsDir = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory |
+    Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $buildToolsDir) { throw "Android build-tools not found under $sdk" }
 $bt = $buildToolsDir.FullName
+# Sirf stable platform dirs (android-34 / android-34.0) - ext/beta dirs walay android.jar skip
 $platform = Get-ChildItem (Join-Path $sdk 'platforms') -Directory |
-    Where-Object { Test-Path (Join-Path $_.FullName 'android.jar') } |
-    Sort-Object {
-        $version = $_.Name -replace '^android-', ''
-        if ($version -notmatch '\.') { $version += '.0' }
-        [version]$version
-    } -Descending |
-    Select-Object -First 1
+    ForEach-Object {
+        if ($_.Name -match '^android-(\d+(?:\.\d+)?)$' -and (Test-Path (Join-Path $_.FullName 'android.jar'))) {
+            $raw = $Matches[1]
+            $ver = if ($raw.Contains('.')) { $raw } else { "$raw.0" }
+            [pscustomobject]@{ Dir = $_; Ver = [version]$ver }
+        }
+    } |
+    Sort-Object Ver -Descending |
+    Select-Object -First 1 -ExpandProperty Dir
 if (-not $platform) { throw "Android platform android.jar not found under $sdk" }
 $androidJar = Join-Path $platform.FullName 'android.jar'
 $javaHome = $env:JAVA_HOME
