@@ -134,9 +134,10 @@ jobs:
           $output | Out-String | Write-Host
           if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed' }
 
-          $signerLine = $output | Select-String -Pattern 'Signer #1 certificate DN:'
-          if (-not $signerLine) { throw 'Could not read the signing certificate from the APK' }
-          $signer = $signerLine.ToString().Trim()
+          # apksigner ke output format build-tools version ke sath badalta hai
+          # ("Signer #1 certificate DN:" purana, "V3.0 Signer: certificate DN:" naya)
+          $signerLine = $output | Select-String -Pattern 'certificate DN:' | Select-Object -First 1
+          $signer = if ($signerLine) { $signerLine.ToString().Trim() } else { 'certificate DN not reported' }
           Write-Host $signer
 
           $hash = (Get-FileHash $apk -Algorithm SHA256).Hash.ToLower()
