@@ -1,93 +1,171 @@
-name: Build & Release Naat Player
+name: Release - Signed APK
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v (e.g. 1.9.0)'
+        required: true
+        type: string
 
 permissions:
-  contents: write   # tag aur release create karne ke liye
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-release:
+  release:
+    name: Build signed APK + GitHub Release
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Prepare version + paths
+        id: prep
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version }}'.TrimStart('v').Trim()
+          } else {
+            $version = '${{ github.ref_name }}'.TrimStart('v').Trim()
+          }
+
+          if ($version -notmatch '^(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?$') {
+            throw "Invalid version '$version'. Use a tag like v1.9.0 or pass version=1.9.0."
+          }
+          $patchPart = if ($Matches['patch']) { [int]$Matches['patch'] } else { 0 }
+          $code = ([int]$Matches['major'] * 10000) + ([int]$Matches['minor'] * 100) + $patchPart
+
+          "version=$version"          | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version_code=$code"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$version"             | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "apk=NaatPlayer-$version.apk" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Check signing secrets
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          $missing = @()
+          foreach ($name in 'KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { $missing += $name }
+          }
+          if ($missing.Count -gt 0) {
+            $list = $missing -join ', '
+            Write-Host "::error::Missing GitHub Actions secrets: $list"
+            Write-Host "Repo -> Settings -> Secrets and variables -> Actions mein ye secrets add karein, phir ye job re-run karein."
+            exit 1
+          }
+          Write-Host 'All signing secrets present.'
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK licenses
+        shell: pwsh
         run: |
           $sdk = $env:ANDROID_SDK_ROOT
           if (-not $sdk) { $sdk = $env:ANDROID_HOME }
-          & "$sdk\cmdline-tools\latest\bin\sdkmanager.bat" --licenses
+          if (-not $sdk) { $sdk = 'C:\Android\android-sdk' }
+          if (-not (Test-Path $sdk)) { throw "Android SDK not found at $sdk" }
+          Write-Host "Android SDK: $sdk"
 
-      - name: Import release keystore (if secret provided)
-        shell: pwsh
-        run: |
-          if ($env:KEYSTORE_BASE64) {
-            $bytes = [System.Convert]::FromBase64String($env:KEYSTORE_BASE64)
-            $outDir = Join-Path $PWD 'out'
-            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-            $ksPath = Join-Path $outDir 'release.keystore'
-            [System.IO.File]::WriteAllBytes($ksPath, $bytes)
-            Write-Host "::set-output name=ks_path::$ksPath"
-            Write-Host "::set-output name=ks_pass::$env:KEYSTORE_PASSWORD"
-            Write-Host "::set-output name=key_alias::$env:KEY_ALIAS"
-            Write-Host "::set-output name=key_pass::$env:KEY_PASSWORD"
-          } else {
-            Write-Host "No KEYSTORE_BASE64 secret — build.ps1 will auto-generate a debug keystore."
+          $hasPlatform = Get-ChildItem (Join-Path $sdk 'platforms') -Directory -ErrorAction SilentlyContinue |
+                         Where-Object { Test-Path (Join-Path $_.FullName 'android.jar') } |
+                         Select-Object -First 1
+          $buildTools = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory -ErrorAction SilentlyContinue
+
+          if (-not $hasPlatform -or -not $buildTools) {
+            $sdkmanager = Get-ChildItem (Join-Path $sdk 'cmdline-tools') -Recurse -Filter 'sdkmanager.bat' -ErrorAction SilentlyContinue |
+                          Select-Object -First 1 -ExpandProperty FullName
+            if (-not $sdkmanager) { throw 'sdkmanager not found and required SDK packages are missing' }
+            ("y`n" * 100) | & $sdkmanager --sdk_root=$sdk --licenses | Out-Null
+            & $sdkmanager --sdk_root=$sdk --install 'platforms;android-34' 'build-tools;34.0.0'
+            if ($LASTEXITCODE -ne 0) { throw 'sdkmanager install failed' }
           }
+
+          "ANDROID_SDK_ROOT=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build signed APK
+        shell: pwsh
         env:
+          VERSION_NAME: ${{ steps.prep.outputs.version }}
+          VERSION_CODE: ${{ steps.prep.outputs.version_code }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        id: keystore
-
-      - name: Build APK (build.ps1)
-        shell: pwsh
         run: |
-          $env:JAVA_HOME = (Get-Command java).Source.Split('\bin\java.exe')[0]
-          $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-          if ($env:KEYSTORE_BASE64) {
-            $env:KEYSTORE_PATH = "${{ steps.keystore.outputs.ks_path }}"
-            $env:KEYSTORE_PASS = "${{ steps.keystore.outputs.ks_pass }}"
-            $env:KEY_ALIAS = "${{ steps.keystore.outputs.key_alias }}"
-            $env:KEY_PASS = "${{ steps.keystore.outputs.key_pass }}"
-          }
+          $ksPath = Join-Path $PWD 'release.keystore'
+          [IO.File]::WriteAllBytes($ksPath, [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+
+          $env:KEYSTORE_PATH = $ksPath
+          $env:KEYSTORE_PASS = $env:KEYSTORE_PASSWORD
+          $env:KEY_PASS      = $env:KEY_PASSWORD
+
           powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed with exit code $LASTEXITCODE" }
 
-      - name: Find built APK
+          Remove-Item $ksPath -Force
+
+      - name: Verify signature + generate checksum
         shell: pwsh
-        id: apk
         run: |
-          $apk = Get-ChildItem -Path . -Filter 'NaatPlayer-*.apk' | Select-Object -First 1 -ExpandProperty FullName
-          Write-Host "::set-output name=path::$apk"
-          Write-Host "::set-output name=name::$(Split-Path $apk -Leaf)"
+          $apk = '${{ steps.prep.outputs.apk }}'
+          $sdk = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { $env:ANDROID_HOME }
+          $bt = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory |
+                Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
+                Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 
-      - name: Create GitHub release + tag and upload APK
-        uses: softprops/action-gh-release@v2
+          $output = & (Join-Path $bt.FullName 'apksigner.bat') verify --print-certs $apk 2>&1
+          $output | Out-String | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed' }
+
+          $signerLine = $output | Select-String -Pattern 'Signer #1 certificate DN:'
+          if (-not $signerLine) { throw 'Could not read the signing certificate from the APK' }
+          $signer = $signerLine.ToString().Trim()
+          Write-Host $signer
+
+          $hash = (Get-FileHash $apk -Algorithm SHA256).Hash.ToLower()
+          "$hash  $apk" | Out-File -FilePath "$apk.sha256" -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+          $summary = @"
+          ### Signed build
+          - Version: **${{ steps.prep.outputs.version }}** (code ${{ steps.prep.outputs.version_code }})
+          - $signer
+          - SHA256: $hash
+          "@
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: v1.9-build-${{ github.run_number }}
-          name: Naat Player v1.9 (build ${{ github.run_number }})
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: Naat Player ${{ steps.prep.outputs.version }}
           body: |
-            Auto build from commit `${{ github.sha }}`.
+            Signed release build of **Naat Player ${{ steps.prep.outputs.version }}** (versionCode `${{ steps.prep.outputs.version_code }}`).
 
-            Download the signed APK below and install on Android.
-          files: ${{ steps.apk.outputs.path }}
+            Commit: `${{ github.sha }}`
+
+            **Install:** neeche se `.apk` download karein aur Android par install karein (unknown sources allow karna hoga).
+            Purani install ke upgrade ke liye wahi signing key honi chahiye.
+          files: |
+            ${{ steps.prep.outputs.apk }}
+            ${{ steps.prep.outputs.apk }}.sha256
+          fail_on_unmatched_files: true
           make_latest: true
-          generate_release_notes: false
+          generate_release_notes: true

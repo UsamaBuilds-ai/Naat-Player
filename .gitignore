@@ -2,6 +2,15 @@
 out/
 *.idsig
 
+# Build outputs - release APKs GitHub Release assets ke tor par jate hain
+NaatPlayer-*.apk
+*.aab
+
+# Signing material - NEVER commit
+*.jks
+*.keystore
+release.keystore
+
 # OS
 .DS_Store
 Thumbs.db
