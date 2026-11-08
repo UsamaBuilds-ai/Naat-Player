@@ -48,32 +48,71 @@ Genres tab, tag editor, lock-screen full player, widgets, crossfade/gapless, mon
 
 ## Build
 
-Lokal build (Windows PowerShell, Android SDK + JDK chahiye):
+Lokal build (Windows PowerShell, Android SDK + JDK 17+ chahiye):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 adb install -r NaatPlayer-1.9.apk
 ```
 
-`build.ps1` aapt2 → javac → d8 → zipalign → apksigner chalata hai. Signing ke liye yeh apne aap `out/pulse-debug.keystore` generate kar leta hai (alias `pulse`, pass `android`). Apni release keystore use karne ke liye GitHub Actions secrets dekhein neeche.
+Version override karne ke liye:
 
-## GitHub Actions — auto build + release + tag
+```powershell
+$env:VERSION_NAME="1.9.0"; $env:VERSION_CODE="10900"
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+```
 
-Har `main` branch push par workflow chalti hai:
+`build.ps1` aapt2 → javac → d8 → zipalign → apksigner chalata hai. Signing ke liye yeh apne aap `out/pulse-debug.keystore` generate kar leta hai (alias `pulse`, pass `android`). Release signing ke liye `KEYSTORE_PATH`, `KEYSTORE_PASS`, `KEY_ALIAS`, `KEY_PASS` env vars set karein.
 
-1. Android SDK + JDK setup
-2. `build.ps1` se signed APK build hota hai
-3. Auto tag banata hai: `v1.9-build-<run-number>`
-4. GitHub Release create hoti hai jisme APK asset upload hoti hai
+## GitHub Actions — CI + signed release
 
-**Keys/secrets repo mein nahi daale jayenge.** Inhein apne GitHub repo ki **Settings → Secrets and variables → Actions** mein add karna hoga:
+Do workflows hain:
 
-| Secret | Kya hai | Zaroori? |
+| Workflow | Trigger | Kya karta hai |
 |---|---|---|
-| `KEYSTORE_BASE64` | Apni `.keystore` / `.jks` file ka base64 string | No — agar nahi diya to auto debug keystore use hoga |
-| `KEYSTORE_PASSWORD` | Keystore ka password | No (debug keystore ke liye `android`) |
-| `KEY_ALIAS` | Signing alias | No (debug keystore ke liye `pulse`) |
-| `KEY_PASSWORD` | Key ka password | No (debug keystore ke liye `android`) |
+| `ci.yml` | PR, `main` push, manual | Debug-signed APK build karke artifact upload karta hai (14 din) |
+| `release.yml` | `v*` tag push, manual dispatch | Secrets se **release-signed** APK build, signature verify, tag par GitHub Release + APK + SHA256 upload |
+
+Release nikalne ka tareeqa:
+
+```powershell
+git tag v1.9.0
+git push origin v1.9.0
+```
+
+Ya GitHub → Actions → **Release - Signed APK** → *Run workflow* (version `1.9.0` dein).
+
+### Zaroori secrets
+
+Repo → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | Kya hai |
+|---|---|
+| `KEYSTORE_BASE64` | Release `.jks` file ka base64 (ek line) |
+| `KEYSTORE_PASSWORD` | Keystore ka password |
+| `KEY_ALIAS` | Key alias (e.g. `naatplayer`) |
+| `KEY_PASSWORD` | Key ka password |
+
+`release.yml` in char ke bagair fail ho jata hai (CI build ke liye keystore ki zaroorat nahi).
+
+### Keystore ek dafa banayein (isse safe rakhein — kho gaya to app update nahi ho payega)
+
+```powershell
+keytool -genkeypair -v -keystore naatplayer-release.jks `
+  -alias naatplayer -keyalg RSA -keysize 2048 -validity 10000 `
+  -dname "CN=Naat Player, O=Naat, C=PK"
+
+# base64 (Windows)
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("naatplayer-release.jks")) | Set-Clipboard
+```
+
+```bash
+# base64 (macOS/Linux)
+base64 -i naatplayer-release.jks | tr -d '\n'
+```
+
+Clipboard wali value `KEYSTORE_BASE64` mein paste karein. `.jks` file kabhi commit na karein — `.gitignore` already block karta hai.
+
 
 ## Files
 
@@ -86,8 +125,8 @@ project/
                           # adapters...
   res/                    # layouts, drawables, values
 build.ps1                 # aapt2 + javac + d8 + zipalign + apksigner (no Gradle)
-NaatPlayer-1.9.apk        # signed build (root par release artifact)
-NaatPlayer-1.7.apk        # purana build
+.github/workflows/ci.yml       # PR/main build
+.github/workflows/release.yml  # tag v* par signed release + APK upload
 ```
 
 ## Limitations

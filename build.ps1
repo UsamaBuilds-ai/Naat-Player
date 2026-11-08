@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $proj = $PSScriptRoot
 $src  = Join-Path $proj 'project'
 $out  = Join-Path $proj 'out'
+$versionName = if ($env:VERSION_NAME) { $env:VERSION_NAME } else { '1.9' }
+$versionCode = if ($env:VERSION_CODE) { [int]$env:VERSION_CODE } else { 10 }
 $sdk = $env:ANDROID_SDK_ROOT
 if (-not $sdk) { $sdk = $env:ANDROID_HOME }
 if (-not $sdk) { $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -35,9 +37,11 @@ if (-not (Test-Path $javac) -or -not (Test-Path $jar)) {
 $env:JAVA_HOME = $javaHome
 $env:PATH = "$javaHome\bin;$env:PATH"
 $build = Join-Path $out 'build'
-if (Test-Path $build) { Remove-Item $build -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $build, (Join-Path $out 'gen'), (Join-Path $out 'classes'), (Join-Path $out 'dex') | Out-Null
+foreach ($dir in @($build, (Join-Path $out 'gen'), (Join-Path $out 'classes'), (Join-Path $out 'dex'))) {
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+}
 New-Item -ItemType Directory -Force -Path $out | Out-Null
+New-Item -ItemType Directory -Force -Path $build, (Join-Path $out 'gen'), (Join-Path $out 'classes'), (Join-Path $out 'dex') | Out-Null
 
 Write-Host "[1/6] aapt2 compile resources"
 & (Join-Path $bt 'aapt2.exe') compile --dir (Join-Path $src 'res') -o (Join-Path $build 'res.zip')
@@ -50,7 +54,7 @@ Write-Host "[2/6] aapt2 link"
     --manifest (Join-Path $src 'AndroidManifest.xml') `
     --java (Join-Path $out 'gen') `
     --min-sdk-version 21 --target-sdk-version 34 `
-    --version-code 10 --version-name 1.9 `
+    --version-code $versionCode --version-name $versionName `
     --auto-add-overlay `
     (Join-Path $build 'res.zip')
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 link failed' }
@@ -78,12 +82,18 @@ if ($LASTEXITCODE -ne 0) { throw 'add_dex failed' }
 if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }
 
 Write-Host "[6/6] sign"
-if ($env:KEYSTORE_PATH -and (Test-Path $env:KEYSTORE_PATH)) {
+if ($env:KEYSTORE_PATH) {
+    if (-not (Test-Path $env:KEYSTORE_PATH)) {
+        throw "KEYSTORE_PATH is set but the file was not found: $($env:KEYSTORE_PATH)"
+    }
     $ks = $env:KEYSTORE_PATH
     $ksPass = $env:KEYSTORE_PASS
     $keyAlias = $env:KEY_ALIAS
     $keyPass = $env:KEY_PASS
-    Write-Host "Using provided keystore: $ks"
+    if (-not $ksPass -or -not $keyAlias -or -not $keyPass) {
+        throw 'KEYSTORE_PASS, KEY_ALIAS and KEY_PASS must be set when KEYSTORE_PATH is provided'
+    }
+    Write-Host "Using provided keystore: $ks (alias $keyAlias)"
 } else {
     $ks = Join-Path $out 'pulse-debug.keystore'
     if (-not (Test-Path $ks)) {
@@ -97,9 +107,9 @@ if ($env:KEYSTORE_PATH -and (Test-Path $env:KEYSTORE_PATH)) {
     $ksPass = 'android'
     $keyAlias = 'pulse'
     $keyPass = 'android'
-    Write-Host "No keystore provided — auto-generated debug keystore at $ks"
+    Write-Host "No keystore provided - auto-generated debug keystore at $ks"
 }
-$final = Join-Path $proj 'NaatPlayer-1.9.apk'
+$final = Join-Path $proj "NaatPlayer-$versionName.apk"
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 & (Join-Path $bt 'apksigner.bat') sign --ks $ks --ks-pass "pass:$ksPass" --key-pass "pass:$keyPass" `
@@ -108,5 +118,14 @@ $signCode = $LASTEXITCODE
 $ErrorActionPreference = $prev
 if ($signCode -ne 0) { throw 'apksigner failed' }
 
-& (Join-Path $bt 'apksigner.bat') verify --print-certs $final 2>&1 | Select-Object -First 4
-Write-Host "BUILD OK -> $final ($([math]::Round((Get-Item $final).Length/1KB,1)) KB)"
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$verifyOut = & (Join-Path $bt 'apksigner.bat') verify --print-certs $final 2>&1
+$verifyCode = $LASTEXITCODE
+$ErrorActionPreference = $prev
+$verifyOut | Select-Object -First 4
+if ($verifyCode -ne 0) { throw 'apksigner verify failed' }
+$sizeKb = [math]::Round((Get-Item $final).Length / 1024, 1)
+Write-Host "BUILD OK -> $final ($sizeKb KB)"
+Write-Host "VERSION=$versionName CODE=$versionCode"
+Write-Host "APK_PATH=$final"
