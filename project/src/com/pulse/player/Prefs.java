@@ -22,6 +22,10 @@ public final class Prefs {
     private static final String KEY_EQ_ENABLED = "eq_enabled";
     private static final String KEY_EQ_PRESET = "eq_preset";
     private static final String KEY_EQ_BANDS = "eq_bands";
+    private static final String KEY_RENAMED_TITLES = "renamed_titles";
+    private static final String KEY_LYRICS_LANG = "lyrics_language";
+    private static final String KEY_LYRICS_ONLINE = "lyrics_online";
+    private static final String KEY_LYRICS_TRANSLATE = "lyrics_translate";
 
     public static final int SORT_NAME = 0;
     public static final int SORT_DATE = 1;
@@ -213,6 +217,83 @@ public final class Prefs {
             sb.append(bands[i]);
         }
         sp(context).edit().putString(KEY_EQ_BANDS, sb.toString()).apply();
+    }
+
+    /**
+     * Local nicknames set by the user ("Auto name", manual rename). MediaStore
+     * lets the TITLE revert to the ID3 tag on the next media scan, so the app
+     * keeps its own map and applies it at every load.
+     */
+    public static String renamedTitle(Context context, long id) {
+        org.json.JSONObject map = readRenamedTitles(context);
+        if (map == null) return null;
+        String value = map.optString(String.valueOf(id), null);
+        return value == null || value.trim().isEmpty() ? null : value;
+    }
+
+    public static void setRenamedTitle(Context context, long id, String title) {
+        org.json.JSONObject map = readRenamedTitles(context);
+        if (map == null) map = new org.json.JSONObject();
+        try {
+            if (title == null || title.trim().isEmpty()) {
+                map.remove(String.valueOf(id));
+            } else {
+                map.put(String.valueOf(id), title);
+            }
+            sp(context).edit().putString(KEY_RENAMED_TITLES, map.toString()).apply();
+        } catch (org.json.JSONException ignored) {
+        }
+    }
+
+    public static void clearRenamedTitle(Context context, long id) {
+        setRenamedTitle(context, id, null);
+    }
+
+    private static org.json.JSONObject readRenamedTitles(Context context) {
+        String raw = sp(context).getString(KEY_RENAMED_TITLES, null);
+        if (raw == null || raw.isEmpty()) return null;
+        try {
+            return new org.json.JSONObject(raw);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ----------------------------------------------------------------- lyrics
+
+    /** Language code the user wants lyrics in. Urdu is the default. */
+    public static String lyricsLanguage(Context context) {
+        return sp(context).getString(KEY_LYRICS_LANG, "ur");
+    }
+
+    public static void setLyricsLanguage(Context context, String code) {
+        sp(context).edit().putString(KEY_LYRICS_LANG, code).apply();
+    }
+
+    public static String lyricsLanguageLabel(Context context) {
+        String code = lyricsLanguage(context);
+        for (int i = 0; i < LyricsOnline.LANG_CODES.length; i++) {
+            if (LyricsOnline.LANG_CODES[i].equals(code)) return LyricsOnline.LANG_LABELS[i];
+        }
+        return LyricsOnline.LANG_LABELS[0];
+    }
+
+    /** Look lyrics up online when nothing local is available. */
+    public static boolean lyricsOnline(Context context) {
+        return sp(context).getBoolean(KEY_LYRICS_ONLINE, true);
+    }
+
+    public static void setLyricsOnline(Context context, boolean value) {
+        sp(context).edit().putBoolean(KEY_LYRICS_ONLINE, value).apply();
+    }
+
+    /** Machine translate to Urdu when only another language was found. */
+    public static boolean translateToUrdu(Context context) {
+        return sp(context).getBoolean(KEY_LYRICS_TRANSLATE, true);
+    }
+
+    public static void setTranslateToUrdu(Context context, boolean value) {
+        sp(context).edit().putBoolean(KEY_LYRICS_TRANSLATE, value).apply();
     }
 
     /** Set when settings change something the library screen has to re-read. */

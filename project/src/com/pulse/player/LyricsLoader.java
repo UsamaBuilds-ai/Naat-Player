@@ -1,6 +1,11 @@
 package com.pulse.player;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
@@ -11,8 +16,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Lyrics from a sidecar .lrc file (timestamped) or from the ID3 USLT frame
- * embedded in the audio file. Nothing leaves the device.
+ * Lyrics lookup order:
+ *
+ * <ol>
+ *   <li>language specific sidecar, e.g. {@code naat.ur.lrc}</li>
+ *   <li>plain sidecar, e.g. {@code naat.lrc}</li>
+ *   <li>ID3 USLT frame embedded in the audio file</li>
+ *   <li>previously cached online result</li>
+ *   <li>online lookup (LRCLIB, then lyrics.ovh) when enabled</li>
+ * </ol>
  */
 public class LyricsLoader {
 
@@ -29,6 +41,8 @@ public class LyricsLoader {
     public static class Lyrics {
         public final List<Line> lines;
         public final boolean synced;
+        /** Human readable origin: local, embedded, cached, online, translated. */
+        public String source = "none";
 
         Lyrics(List<Line> lines, boolean synced) {
             this.lines = lines;
@@ -39,42 +53,96 @@ public class LyricsLoader {
     private static final Pattern TIME_TAG =
             Pattern.compile("\\[(\\d{1,3}):(\\d{1,2})(?:[.:](\\d{1,3}))?]");
 
-    public static Lyrics load(Song song) {
+    private static final long MAX_CACHE_BYTES = 512 * 1024;
+
+    public static Lyrics load(Context context, Song song) {
         if (song == null || song.path == null) return null;
 
-        String lrc = readSidecar(song.path);
-        if (lrc != null) {
-            Lyrics parsed = parse(lrc);
-            if (parsed != null) return parsed;
+        String lang = Prefs.lyricsLanguage(context);
+
+        if (!"auto".equals(lang)) {
+            Lyrics localized = parse(readSidecar(song.path, lang));
+            if (localized != null) {
+                localized.source = "local · " + lang;
+                return localized;
+            }
         }
 
-        String embedded = readEmbeddedUslt(song.path);
-        if (embedded != null) return parse(embedded);
+        Lyrics plain = parse(readSidecar(song.path, null));
+        if (plain != null) {
+            plain.source = "local";
+            return plain;
+        }
+
+        Lyrics embedded = parse(readEmbeddedUslt(song.path));
+        if (embedded != null) {
+            embedded.source = "embedded";
+            return embedded;
+        }
+
+        File cached = cacheFile(context, song, lang);
+        Lyrics fromCache = parse(readTextFile(cached));
+        if (fromCache != null) {
+            fromCache.source = "cached";
+            return fromCache;
+        }
+
+        if (Prefs.lyricsOnline(context) && hasInternet(context)) {
+            LyricsOnline.Result result = LyricsOnline.fetch(context, song, lang);
+            if (result != null) {
+                Lyrics online = parse(result.text);
+                if (online != null) {
+                    online.source = result.translated ? "online · translated" : "online";
+                    writeCache(cached, result.text);
+                    return online;
+                }
+            }
+        }
         return null;
     }
 
     // ------------------------------------------------------------- sidecar .lrc
 
-    private static String readSidecar(String audioPath) {
+    private static String readSidecar(String audioPath, String lang) {
         String base = audioPath;
         int dot = base.lastIndexOf('.');
         if (dot > 0) base = base.substring(0, dot);
-        String[] candidates = {base + ".lrc", base + ".LRC", base + ".Lrc"};
-        for (String candidate : candidates) {
-            try {
-                File file = new File(candidate);
-                if (!file.isFile() || file.length() > 512 * 1024) continue;
-                byte[] data = new byte[(int) file.length()];
-                RandomAccessFile raf = new RandomAccessFile(file, "r");
-                raf.readFully(data);
-                raf.close();
-                String text = new String(data, "UTF-8");
-                if (text.startsWith("\uFEFF")) text = text.substring(1);
-                return text;
-            } catch (Exception ignored) {
+
+        if (lang != null && !lang.isEmpty()) {
+            String[] localized = {
+                    base + "." + lang + ".lrc",
+                    base + "." + lang + ".LRC",
+                    base + "." + lang.toUpperCase() + ".lrc",
+                    base + "_" + lang + ".lrc"
+            };
+            for (String candidate : localized) {
+                String text = readTextFile(new File(candidate));
+                if (text != null) return text;
             }
         }
+
+        String[] candidates = {base + ".lrc", base + ".LRC", base + ".Lrc"};
+        for (String candidate : candidates) {
+            String text = readTextFile(new File(candidate));
+            if (text != null) return text;
+        }
         return null;
+    }
+
+    private static String readTextFile(File file) {
+        if (file == null) return null;
+        try {
+            if (!file.isFile() || file.length() > MAX_CACHE_BYTES) return null;
+            byte[] data = new byte[(int) file.length()];
+            RandomAccessFile raf = new RandomAccessFile(file, "r");
+            raf.readFully(data);
+            raf.close();
+            String text = new String(data, "UTF-8");
+            if (text.startsWith("\uFEFF")) text = text.substring(1);
+            return text;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     // -------------------------------------------------------------- ID3 USLT
@@ -130,7 +198,6 @@ public class LyricsLoader {
     private static String decodeUslt(byte[] body, int start, int end, int encoding) {
         try {
             String charSet;
-            int textFrom = start;
             switch (encoding) {
                 case 0:
                     charSet = "ISO-8859-1";
@@ -163,7 +230,7 @@ public class LyricsLoader {
                     i += 1;
                 }
             }
-            textFrom = i;
+            int textFrom = i;
             if (textFrom >= end) return null;
 
             String text = new String(body, textFrom, end - textFrom, charSet);
@@ -173,6 +240,57 @@ public class LyricsLoader {
             return text.isEmpty() ? null : text;
         } catch (UnsupportedEncodingException e) {
             return null;
+        }
+    }
+
+    // ------------------------------------------------------------------ cache
+
+    private static File cacheFile(Context context, Song song, String lang) {
+        try {
+            File dir = new File(context.getFilesDir(), "lyrics");
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            return new File(dir, song.id + "-" + lang + ".lrc");
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static void writeCache(File file, String text) {
+        if (file == null || text == null || text.trim().isEmpty()) return;
+        if (text.length() > MAX_CACHE_BYTES) return;
+        FileOutputStream out = null;
+        try {
+            out = new FileOutputStream(file);
+            out.write(text.getBytes("UTF-8"));
+        } catch (Exception ignored) {
+        } finally {
+            try {
+                if (out != null) out.close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** Clears cached online lyrics so the next open fetches again. */
+    public static void clearCache(Context context) {
+        try {
+            File dir = new File(context.getFilesDir(), "lyrics");
+            File[] files = dir.listFiles();
+            if (files == null) return;
+            for (File file : files) file.delete();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean hasInternet(Context context) {
+        try {
+            ConnectivityManager manager = (ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (manager == null) return true;
+            NetworkInfo info = manager.getActiveNetworkInfo();
+            return info == null || info.isConnected();
+        } catch (Throwable ignored) {
+            return true;
         }
     }
 

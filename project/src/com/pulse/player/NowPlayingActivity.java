@@ -8,11 +8,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -23,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 
 public class NowPlayingActivity extends Activity implements PlayerEngine.Listener {
+
+    private static final int SWIPE_DP = 60;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final List<TextView> lyricViews = new ArrayList<>();
@@ -41,25 +41,27 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
     private TextView btnTimer;
     private TextView btnFav;
     private TextView btnQueue;
-    private TextView bigArtGlyph;
     private TextView lyricsStatus;
-    private ImageView bigArtImage;
-    private View bigArt;
-    private View lyricsCard;
-    private TextView btnEq;
+    private TextView btnLanguage;
+    private TextView lyricsHint;
+
+    private DiscArtView disc;
+    private View scrim;
+    private View lyricsSheet;
     private SeekBar seekBar;
     private ScrollView lyricsScroll;
     private LinearLayout lyricsBox;
-    private EqualizerView eqVisualizer;
-
-    private GestureDetector gestureDetector;
-    private static final int SWIPE_THRESHOLD = 100;
-    private static final int SWIPE_VELOCITY_THRESHOLD = 100;
 
     private LyricsLoader.Lyrics lyrics;
     private long lyricsSongId = Long.MIN_VALUE;
+    private String lyricsLang = "";
     private int activeLine = -1;
     private boolean dragging;
+    private boolean sheetOpen;
+
+    private float downX;
+    private float downY;
+    private boolean gestureAllowed;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -80,6 +82,15 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         engine.attach(this);
         artLoader = new AlbumArtLoader();
 
+        bindViews();
+        paintTheme();
+        wire();
+        renderTrack();
+        loadLyrics();
+        paintModes();
+    }
+
+    private void bindViews() {
         title = findViewById(R.id.title);
         subtitle = findViewById(R.id.subtitle);
         posText = findViewById(R.id.posText);
@@ -90,55 +101,20 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         btnTimer = findViewById(R.id.btnTimer);
         btnFav = findViewById(R.id.btnFav);
         btnQueue = findViewById(R.id.btnQueue);
-        bigArt = findViewById(R.id.bigArt);
-        bigArtImage = findViewById(R.id.bigArtImg);
-        bigArtGlyph = findViewById(R.id.bigArtGlyph);
-        lyricsCard = findViewById(R.id.lyricsCard);
         lyricsStatus = findViewById(R.id.lyricsStatus);
-        btnEq = findViewById(R.id.btnEq);
+        btnLanguage = findViewById(R.id.btnLanguage);
+        lyricsHint = findViewById(R.id.lyricsHint);
+        disc = findViewById(R.id.disc);
+        scrim = findViewById(R.id.scrim);
+        lyricsSheet = findViewById(R.id.lyricsSheet);
         seekBar = findViewById(R.id.seekBar);
         lyricsScroll = findViewById(R.id.lyricsScroll);
         lyricsBox = findViewById(R.id.lyricsBox);
-        eqVisualizer = findViewById(R.id.eqVisualizer);
 
-        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override
-            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-                float diffY = e2.getY() - e1.getY();
-                float diffX = e2.getX() - e1.getX();
-                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > SWIPE_THRESHOLD) {
-                    // horizontal swipe: ignore
-                    return false;
-                }
-                if (diffY > SWIPE_THRESHOLD && velocityY > SWIPE_VELOCITY_THRESHOLD) {
-                    finish();
-                }
-                return true;
-            }
-        });
-
-        findViewById(R.id.root).setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                gestureDetector.onTouchEvent(event);
-                return false;
-            }
-        });
-
-        paintTheme();
-        wire();
-        renderTrack();
-        loadLyrics();
-        paintModes();
+        lyricsStatus.setVisibility(View.INVISIBLE);
     }
 
     private void wire() {
-        btnEq.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(NowPlayingActivity.this, EqualizerActivity.class));
-            }
-        });
         btnTimer.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -194,6 +170,24 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
                 engine.cycleRepeat();
             }
         });
+        lyricsHint.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openLyrics();
+            }
+        });
+        btnLanguage.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLanguageDialog();
+            }
+        });
+        scrim.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                closeLyrics();
+            }
+        });
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -220,33 +214,35 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         getWindow().setStatusBarColor(theme.bgTop);
         getWindow().setNavigationBarColor(theme.bgTop);
 
-        lyricsCard.setBackground(Ui.card(theme.cardTop, theme.cardBottom, theme.cardStroke));
-        btnEq.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 20, theme.cardStroke));
-        btnTimer.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 20, theme.cardStroke));
-        btnFav.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 20, theme.cardStroke));
-        btnQueue.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 20, theme.cardStroke));
-        btnShuffle.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 23, theme.cardStroke));
-        btnRepeat.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 23, theme.cardStroke));
+        lyricsSheet.setBackground(Ui.card(theme.cardTop, theme.cardBottom, theme.cardStroke));
+        btnTimer.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 24, theme.cardStroke));
+        btnFav.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 24, theme.cardStroke));
+        btnQueue.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 24, theme.cardStroke));
+        btnShuffle.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 24, theme.cardStroke));
+        btnRepeat.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 24, theme.cardStroke));
         findViewById(R.id.btnPrev).setBackground(
-                Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 26, theme.cardStroke));
+                Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 28, theme.cardStroke));
         findViewById(R.id.btnNext).setBackground(
-                Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 26, theme.cardStroke));
+                Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 28, theme.cardStroke));
 
         btnPlay.setBackground(Ui.oval(theme.accentSoft, theme.accent));
         btnPlay.setTextColor(theme.onAccent);
-        bigArt.setBackground(Ui.art(theme.cardTop, theme.accent, 28));
-        bigArtGlyph.setTextColor(theme.onAccent);
+        disc.setDiscTheme(theme);
+        btnLanguage.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 17, theme.cardStroke));
+        btnLanguage.setTextColor(theme.accent);
 
         ((TextView) findViewById(R.id.npLabel)).setTextColor(theme.accent);
         ((TextView) findViewById(R.id.lyricsLabel)).setTextColor(theme.accent);
+        ((View) findViewById(R.id.sheetHandle)).setBackground(
+                Ui.round(theme.cardStroke, 4, 0));
         title.setTextColor(theme.text);
         subtitle.setTextColor(theme.textDim);
         posText.setTextColor(theme.textDim);
         durText.setTextColor(theme.textDim);
         lyricsStatus.setTextColor(theme.textDim);
+        lyricsHint.setTextColor(theme.textDim);
         btnTimer.setTextColor(theme.text);
         btnQueue.setTextColor(theme.text);
-        btnEq.setTextColor(theme.text);
         ((TextView) findViewById(R.id.btnPrev)).setTextColor(theme.accentSoft);
         ((TextView) findViewById(R.id.btnNext)).setTextColor(theme.accentSoft);
 
@@ -270,22 +266,26 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         if (song == null) {
             title.setText(R.string.nothing_playing);
             subtitle.setText(R.string.tagline);
-            bigArtImage.setImageDrawable(null);
-            bigArtGlyph.setVisibility(View.VISIBLE);
+            disc.setArt(null);
+            disc.setSpinning(false);
             paintFavourite();
-            eqVisualizer.setActive(false);
+            lyricsHint.setVisibility(View.GONE);
             return;
         }
         title.setText(song.title);
         String sub = song.artist;
         if (!song.album.isEmpty()) sub = sub.isEmpty() ? song.album : sub + " • " + song.album;
         subtitle.setText(sub);
+        lyricsHint.setVisibility(View.VISIBLE);
 
-        bigArt.setTag(song.id);
-        int px = Math.round(250 * getResources().getDisplayMetrics().density);
-        artLoader.load(song, px, bigArtImage, bigArtGlyph);
+        // Decode big enough for a full-width disc, never a recycled thumbnail.
+        int px = Math.min(1440, Math.max(
+                getResources().getDisplayMetrics().widthPixels,
+                getResources().getDisplayMetrics().heightPixels));
+        artLoader.load(song, px, disc);
+        disc.setSpinning(engine.isPlaying());
+
         paintFavourite();
-        eqVisualizer.setActive(engine.isPlaying());
     }
 
     /** Heart button reflects the current song's favourite state. */
@@ -297,7 +297,126 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         btnFav.setBackground(Ui.round(favourite
                         ? ((theme.accent & 0x00FFFFFF) | 0x33000000)
                         : ((theme.accent & 0x00FFFFFF) | 0x1A000000),
-                20, favourite ? theme.accent : theme.cardStroke));
+                24, favourite ? theme.accent : theme.cardStroke));
+    }
+
+    // ------------------------------------------------------------ lyrics sheet
+
+    private void openLyrics() {
+        if (sheetOpen) return;
+        sheetOpen = true;
+
+        int fallback = getResources().getDisplayMetrics().heightPixels;
+        float from = lyricsSheet.getHeight() > 0 ? lyricsSheet.getHeight() : fallback;
+
+        scrim.setVisibility(View.VISIBLE);
+        scrim.setAlpha(0f);
+        scrim.animate().alpha(1f).setDuration(220).start();
+
+        lyricsSheet.setVisibility(View.VISIBLE);
+        lyricsSheet.setTranslationY(from);
+        lyricsSheet.animate().translationY(0f).setDuration(280).start();
+    }
+
+    private void closeLyrics() {
+        if (!sheetOpen) return;
+        sheetOpen = false;
+
+        int fallback = getResources().getDisplayMetrics().heightPixels;
+        float to = lyricsSheet.getHeight() > 0 ? lyricsSheet.getHeight() : fallback;
+
+        scrim.animate().alpha(0f).setDuration(200).start();
+        lyricsSheet.animate().translationY(to).setDuration(240)
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        lyricsSheet.setVisibility(View.GONE);
+                        scrim.setVisibility(View.GONE);
+                    }
+                }).start();
+    }
+
+    /**
+     * Gestures are read from dispatchTouchEvent so they still work over
+     * clickable children (the old implementation missed every swipe).
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = event.getRawX();
+                downY = event.getRawY();
+                gestureAllowed = !insideSeekBar(event);
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (gestureAllowed
+                        && Math.abs(event.getRawX() - downX)
+                        > Math.abs(event.getRawY() - downY) * 1.4f) {
+                    gestureAllowed = false;
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+                if (gestureAllowed) {
+                    float dy = event.getRawY() - downY;
+                    float dx = event.getRawX() - downX;
+                    if (Math.abs(dy) > dp(SWIPE_DP) && Math.abs(dy) > Math.abs(dx) * 1.2f) {
+                        if (dy < 0) {
+                            if (!sheetOpen) openLyrics();
+                        } else if (sheetOpen) {
+                            if (canCloseSheetFrom()) closeLyrics();
+                        } else {
+                            finish();
+                        }
+                    }
+                }
+                gestureAllowed = false;
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                gestureAllowed = false;
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    private boolean insideSeekBar(MotionEvent event) {
+        if (seekBar == null) return false;
+        int[] location = new int[2];
+        seekBar.getLocationOnScreen(location);
+        float x = event.getRawX();
+        float y = event.getRawY();
+        return x >= location[0] - dp(14) && x <= location[0] + seekBar.getWidth() + dp(14)
+                && y >= location[1] - dp(14) && y <= location[1] + seekBar.getHeight() + dp(14);
+    }
+
+    /** Swiping down closes the sheet, unless the user is reading scrolled lyrics. */
+    private boolean canCloseSheetFrom() {
+        if (lyricsScroll.getScrollY() <= 0) return true;
+        int[] location = new int[2];
+        lyricsSheet.getLocationOnScreen(location);
+        return downY < location[1] + dp(120);
+    }
+
+    private void showLanguageDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Lyrics language")
+                .setItems(LyricsOnline.LANG_LABELS, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Prefs.setLyricsLanguage(NowPlayingActivity.this,
+                                LyricsOnline.LANG_CODES[which]);
+                        paintLanguage();
+                        lyricsSongId = Long.MIN_VALUE;
+                        lyrics = null;
+                        loadLyrics();
+                    }
+                })
+                .show();
+    }
+
+    private void paintLanguage() {
+        btnLanguage.setText(Prefs.lyricsLanguageLabel(this).toUpperCase(Locale.US) + " ▾");
     }
 
     // ------------------------------------------------------------------ lyrics
@@ -308,20 +427,25 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
             showLyricsMessage("Play a Naat to see its lyrics");
             return;
         }
-        if (song.id == lyricsSongId) return;
+        final String lang = Prefs.lyricsLanguage(this);
+        if (song.id == lyricsSongId && lang.equals(lyricsLang)) return;
+
         lyricsSongId = song.id;
+        lyricsLang = lang;
         lyrics = null;
         activeLine = -1;
+        paintLanguage();
         showLyricsMessage("Loading lyrics…");
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final LyricsLoader.Lyrics loaded = LyricsLoader.load(song);
+                final LyricsLoader.Lyrics loaded = LyricsLoader.load(NowPlayingActivity.this, song);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
-                        if (engine.getCurrent() != null && engine.getCurrent().id == song.id) {
+                        Song current = engine.getCurrent();
+                        if (current != null && current.id == song.id) {
                             lyrics = loaded;
                             renderLyrics();
                         }
@@ -333,14 +457,16 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
 
     private void showLyricsMessage(String message) {
         lyricsBox.removeAllViews();
+        lyricViews.clear();
         TextView tv = new TextView(this);
         tv.setText(message);
         tv.setTextColor(theme.textDim);
         tv.setTextSize(13);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(0, toPx(18), 0, 0);
+        tv.setPadding(0, toPx(24), 0, 0);
         lyricsBox.addView(tv);
         lyricsStatus.setText("");
+        lyricsStatus.setVisibility(View.INVISIBLE);
     }
 
     private void renderLyrics() {
@@ -349,20 +475,27 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         activeLine = -1;
 
         if (lyrics == null || lyrics.lines.isEmpty()) {
-            showLyricsMessage("No lyrics found.\n\nAdd a .lrc file next to the Naat, "
-                    + "or embed lyrics (USLT tag) in the audio file.");
-            lyricsStatus.setText("none");
+            showLyricsMessage("No lyrics found.\n\nAdd a .lrc file next to the Naat "
+                    + "(naat.ur.lrc for Urdu), embed a USLT tag, or turn on online lyrics "
+                    + "in Settings.");
             return;
         }
 
-        lyricsStatus.setText(lyrics.synced ? "synced" : "plain");
+        String status = lyrics.synced ? "synced" : "plain";
+        if (lyrics.source != null && !"local".equals(lyrics.source)
+                && !"none".equals(lyrics.source)) {
+            status = lyrics.source + " · " + status;
+        }
+        lyricsStatus.setText(status);
+        lyricsStatus.setVisibility(View.VISIBLE);
+
         for (LyricsLoader.Line line : lyrics.lines) {
             TextView tv = new TextView(this);
             tv.setText(line.text.isEmpty() ? "♪" : line.text);
             tv.setTextSize(14);
             tv.setTextColor(theme.textDim);
-            tv.setPadding(0, toPx(4), 0, toPx(4));
-            tv.setLineSpacing(0f, 1.15f);
+            tv.setPadding(0, toPx(5), 0, toPx(5));
+            tv.setLineSpacing(0f, 1.2f);
             lyricsBox.addView(tv);
             lyricViews.add(tv);
         }
@@ -436,7 +569,7 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
                 .show();
     }
 
-    // ------------------------------------------------------------------ life
+    // ------------------------------------------------------------------- life
 
     @Override
     protected void onStart() {
@@ -449,6 +582,7 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         engine.addListener(this);
         ui.post(ticker);
         renderTrack();
+        paintLanguage();
         loadLyrics();
     }
 
@@ -463,6 +597,21 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
     protected void onDestroy() {
         artLoader.shutdown();
         super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (sheetOpen) {
+            closeLyrics();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
+        overridePendingTransition(R.anim.np_hold, R.anim.np_out);
     }
 
     @Override
@@ -481,6 +630,7 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
         posText.setText(format(position));
         durText.setText(format(duration));
         btnPlay.setText(engine.isPlaying() ? "❚❚" : "▶");
+        disc.setSpinning(engine.isPlaying());
 
         long remaining = engine.sleepRemainingMs();
         if (remaining > 0) {
@@ -488,7 +638,7 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
             btnTimer.setTextSize(10);
         } else {
             btnTimer.setText(engine.isStopAfterThisSong() ? "1⏱" : "⏱");
-            btnTimer.setTextSize(16);
+            btnTimer.setTextSize(17);
         }
     }
 
@@ -504,5 +654,9 @@ public class NowPlayingActivity extends Activity implements PlayerEngine.Listene
 
     private int toPx(int dp) {
         return Math.round(dp * getResources().getDisplayMetrics().density);
+    }
+
+    private float dp(float value) {
+        return value * getResources().getDisplayMetrics().density;
     }
 }

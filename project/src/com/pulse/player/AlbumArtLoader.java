@@ -13,30 +13,45 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Loads embedded album art off the UI thread and keeps it in an LRU cache.
- * Falls back to the sky-blue gradient tile when a track has no artwork.
+ * Loads embedded album art off the UI thread and keeps decoded bitmaps in an
+ * LRU cache.
+ *
+ * The cache is keyed by song id <em>and</em> requested size, so a 40dp list
+ * thumbnail can never be reused for the big Now Playing disc (that was the
+ * reason the large artwork looked blurry).
  */
 public class AlbumArtLoader {
 
-    private final LruCache<Long, Bitmap> cache = new LruCache<Long, Bitmap>(60) {
+    /** 32 MB of decoded bitmaps - enough for a large disc plus a screen of thumbs. */
+    private static final int CACHE_KB = 32 * 1024;
+
+    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(CACHE_KB) {
         @Override
-        protected int sizeOf(Long key, Bitmap value) {
-            return value.getByteCount() / 1024;
+        protected int sizeOf(String key, Bitmap value) {
+            return Math.max(1, value.getByteCount() / 1024);
         }
     };
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
 
+    private static String key(long id, int targetPx) {
+        int bucket = targetPx <= 0 ? 64 : Integer.highestOneBit(targetPx);
+        return id + "@" + bucket;
+    }
+
     public void load(final Song song, final int targetPx,
                      final ImageView image, final TextView glyph) {
-        Bitmap cached = cache.get(song.id);
+        if (song == null) return;
+        final String cacheKey = key(song.id, targetPx);
+        Bitmap cached = cache.get(cacheKey);
         if (cached != null) {
             image.setImageBitmap(cached);
             glyph.setVisibility(TextView.GONE);
             return;
         }
 
+        image.setTag(song.id);
         image.setImageDrawable(null);
         glyph.setVisibility(TextView.VISIBLE);
 
@@ -45,7 +60,7 @@ public class AlbumArtLoader {
             public void run() {
                 final Bitmap bitmap = readArt(song, targetPx);
                 if (bitmap == null) return;
-                cache.put(song.id, bitmap);
+                cache.put(cacheKey, bitmap);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
@@ -60,19 +75,55 @@ public class AlbumArtLoader {
         });
     }
 
+    /** Loads the artwork straight into the spinning disc on the Now Playing screen. */
+    public void load(final Song song, final int targetPx, final DiscArtView disc) {
+        if (song == null || disc == null) return;
+        final String cacheKey = key(song.id, targetPx);
+        Bitmap cached = cache.get(cacheKey);
+        if (cached != null) {
+            disc.setArt(cached);
+            return;
+        }
+
+        disc.setTag(song.id);
+        disc.setArt(null);
+
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final Bitmap bitmap = readArt(song, targetPx);
+                if (bitmap == null) return;
+                cache.put(cacheKey, bitmap);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        Object tag = disc.getTag();
+                        if (tag instanceof Long && ((Long) tag) == song.id) {
+                            disc.setArt(bitmap);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
     private Bitmap readArt(Song song, int targetPx) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(song.path);
             byte[] embedded = retriever.getEmbeddedPicture();
             if (embedded == null || embedded.length == 0) return null;
+
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(embedded, 0, embedded.length, bounds);
+
             int sample = 1;
             while (bounds.outWidth / (sample * 2) >= targetPx) sample *= 2;
+
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = sample;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
             return BitmapFactory.decodeByteArray(embedded, 0, embedded.length, options);
         } catch (Throwable ignored) {
             return null;

@@ -90,8 +90,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private TextView npArtist;
     private TextView npTime;
     private TextView btnPlay;
-    private TextView btnShuffle;
-    private TextView btnRepeat;
     private TextView grantButton;
     private TextView btnTheme;
     private TextView btnEye;
@@ -104,10 +102,9 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private TextView tabArtists;
     private TextView tabFolders;
     private TextView tabVideos;
-    private TextView chipFavourites;
-    private TextView chipRecent;
-    private TextView chipPlaylists;
-    private TextView chipQueue;
+    private TextView btnFavourite;
+    private TextView btnRecent;
+    private TextView btnPlaylists;
     private TextView brand;
     private TextView headline;
     private TextView nowArtGlyph;
@@ -223,7 +220,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         wireControls();
 
         paintTransport();
-        paintModes();
     }
 
     private void bindViews() {
@@ -235,8 +231,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         npArtist = findViewById(R.id.npArtist);
         npTime = findViewById(R.id.npTime);
         btnPlay = findViewById(R.id.btnPlay);
-        btnShuffle = findViewById(R.id.btnShuffle);
-        btnRepeat = findViewById(R.id.btnRepeat);
         grantButton = findViewById(R.id.grantButton);
         btnTheme = findViewById(R.id.btnTheme);
         btnEye = findViewById(R.id.btnEye);
@@ -249,10 +243,9 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         tabArtists = findViewById(R.id.tabArtists);
         tabFolders = findViewById(R.id.tabFolders);
         tabVideos = findViewById(R.id.tabVideos);
-        chipFavourites = findViewById(R.id.chipFavourites);
-        chipRecent = findViewById(R.id.chipRecent);
-        chipPlaylists = findViewById(R.id.chipPlaylists);
-        chipQueue = findViewById(R.id.chipQueue);
+        btnFavourite = findViewById(R.id.btnFavourite);
+        btnRecent = findViewById(R.id.btnRecent);
+        btnPlaylists = findViewById(R.id.btnPlaylists);
         brand = findViewById(R.id.brand);
         headline = findViewById(R.id.headline);
         nowArt = findViewById(R.id.nowArt);
@@ -270,22 +263,28 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 engine.toggle();
             }
         });
-        btnShuffle.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                engine.setShuffle(!engine.isShuffle());
-            }
-        });
-        btnRepeat.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                engine.cycleRepeat();
-            }
-        });
         btnTheme.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showThemeChooser();
+            }
+        });
+        btnFavourite.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                setMode(mode == MODE_FAVOURITES ? MODE_ALL : MODE_FAVOURITES);
+            }
+        });
+        btnRecent.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                setMode(mode == MODE_RECENT ? MODE_ALL : MODE_RECENT);
+            }
+        });
+        btnPlaylists.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                setMode(mode == MODE_PLAYLISTS ? MODE_ALL : MODE_PLAYLISTS);
             }
         });
         btnEye.setOnClickListener(new View.OnClickListener() {
@@ -331,7 +330,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             public void onClick(View v) {
                 int id = v.getId();
                 mode = MODE_ALL;
-                paintChips();
+                paintLibraryModes();
                 if (id == R.id.tabAlbums) {
                     folderFilter = null;
                     selectTab(TAB_ALBUMS);
@@ -359,31 +358,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                 selectTab(TAB_VIDEOS);
                 if (hasVideoPermission()) loadVideos();
                 else showVideoPermissionState();
-            }
-        });
-
-        chipFavourites.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                setMode(mode == MODE_FAVOURITES ? MODE_ALL : MODE_FAVOURITES);
-            }
-        });
-        chipRecent.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                setMode(mode == MODE_RECENT ? MODE_ALL : MODE_RECENT);
-            }
-        });
-        chipPlaylists.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                setMode(mode == MODE_PLAYLISTS ? MODE_ALL : MODE_PLAYLISTS);
-            }
-        });
-        chipQueue.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, QueueActivity.class));
             }
         });
 
@@ -437,8 +411,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         searchInput.setTextColor(theme.text);
         searchInput.setHintTextColor(theme.textDim);
 
-        btnShuffle.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 21, theme.cardStroke));
-        btnRepeat.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 21, theme.cardStroke));
         btnTheme.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 19, theme.cardStroke));
         btnTheme.setTextColor(theme.text);
         btnSettings.setBackground(Ui.round((theme.accent & 0x00FFFFFF) | 0x1A000000, 19, theme.cardStroke));
@@ -466,23 +438,22 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         Ui.tintSeekBar(seekBar, theme);
         paintTabs();
         paintEye();
-        paintChips();
+        paintLibraryModes();
     }
 
-    private void paintChips() {
-        styleChip(chipFavourites, mode == MODE_FAVOURITES);
-        styleChip(chipRecent, mode == MODE_RECENT);
-        styleChip(chipPlaylists, mode == MODE_PLAYLISTS);
-        styleChip(chipQueue, false);
+    private void paintLibraryModes() {
+        styleModeButton(btnFavourite, mode == MODE_FAVOURITES);
+        styleModeButton(btnRecent, mode == MODE_RECENT);
+        styleModeButton(btnPlaylists, mode == MODE_PLAYLISTS);
         boolean hasFavourites = !Prefs.favoriteIds(this).isEmpty();
-        chipFavourites.setText(hasFavourites ? "♥ Favourites" : "♡ Favourites");
+        btnFavourite.setText(hasFavourites ? "♥ My Favourite" : "♡ My Favourite");
     }
 
-    private void styleChip(TextView chip, boolean active) {
-        chip.setTextColor(active ? theme.onAccent : theme.textDim);
-        chip.setBackground(Ui.round(active ? theme.accent
+    private void styleModeButton(TextView button, boolean active) {
+        button.setTextColor(active ? theme.onAccent : theme.textDim);
+        button.setBackground(Ui.round(active ? theme.accent
                         : ((theme.accent & 0x00FFFFFF) | 0x14000000),
-                20, active ? theme.accent : theme.cardStroke));
+                16, active ? theme.accent : theme.cardStroke));
     }
 
     private void paintTabs() {
@@ -505,19 +476,20 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     }
 
     private void showThemeChooser() {
-        final String[] labels = new String[Theme.ALL.length];
-        for (int i = 0; i < Theme.ALL.length; i++) labels[i] = Theme.ALL[i].label;
-
-        new AlertDialog.Builder(this)
+        final AlertDialog[] holder = new AlertDialog[1];
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Theme")
-                .setItems(labels, new DialogInterface.OnClickListener() {
+                .setView(Ui.themeCards(this, theme, new Ui.ThemePick() {
                     @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        Theme.select(MainActivity.this, Theme.ALL[which]);
+                    public void onPick(Theme picked) {
+                        Theme.select(MainActivity.this, picked);
+                        if (holder[0] != null) holder[0].dismiss();
                         recreate();
                     }
-                })
-                .show();
+                }))
+                .create();
+        holder[0] = dialog;
+        dialog.show();
     }
 
     // ------------------------------------------------------------------ tabs
@@ -589,7 +561,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
         }
 
         paintTabs();
-        paintChips();
+        paintLibraryModes();
         applyFilter(searchInput.getText().toString());
     }
 
@@ -618,7 +590,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             recentIds.clear();
             recentIds.addAll(Usage.recent(this));
             songAdapter.notifyDataSetChanged();
-            paintChips();
+            paintLibraryModes();
             if (mode == MODE_PLAYLISTS) {
                 buildPlaylistGroups();
                 if (groupAdapter != null) groupAdapter.notifyDataSetChanged();
@@ -775,6 +747,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private void loadSongs() {
         List<Song> loaded = Library.load(this);
         reconcilePendingMediaChanges(loaded);
+        applyRenamedTitles(loaded);
         allSongs.clear();
         engine.restorePlayback(loaded, true);
 
@@ -813,8 +786,20 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
 
         buildGroups();
         paintEye();
-        paintChips();
+        paintLibraryModes();
         applyFilter(searchInput.getText().toString());
+    }
+
+    /** Re-applies local nicknames over whatever MediaStore currently reports. */
+    private void applyRenamedTitles(List<Song> loaded) {
+        for (int i = 0; i < loaded.size(); i++) {
+            Song song = loaded.get(i);
+            String nick = Prefs.renamedTitle(this, song.id);
+            if (nick != null && !nick.equals(song.title)) {
+                loaded.set(i, new Song(song.id, song.albumId, nick, song.artist,
+                        song.album, song.durationMs, song.dateAdded, song.path));
+            }
+        }
     }
 
     private static boolean hasDotSegment(String path) {
@@ -1014,7 +999,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
                                 || choice.startsWith("Remove from Favourites")) {
                             boolean added = Prefs.toggleFavorite(MainActivity.this, song.id);
                             songAdapter.notifyDataSetChanged();
-                            paintChips();
+                            paintLibraryModes();
                             Toast.makeText(MainActivity.this,
                                     added ? "Added to Favourites" : "Removed from Favourites",
                                     Toast.LENGTH_SHORT).show();
@@ -1147,6 +1132,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             }
             pendingDeletedSongIds.add(song.id);
             pendingRenamedSongs.remove(song.id);
+            Prefs.clearRenamedTitle(this, song.id);
             engine.removeSong(song.id);
             allSongs.remove(song);
             songById.remove(song.id);
@@ -1235,6 +1221,7 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
             Song updatedSong = new Song(song.id, song.albumId, updatedTitle, song.artist,
                     song.album, song.durationMs, song.dateAdded, updatedFile.getAbsolutePath());
             pendingRenamedSongs.put(song.id, updatedSong);
+            Prefs.setRenamedTitle(this, song.id, updatedSong.title);
             for (int i = 0; i < allSongs.size(); i++) {
                 if (allSongs.get(i).id == song.id) allSongs.set(i, updatedSong);
             }
@@ -1449,7 +1436,6 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     @Override
     public void onPlayerChanged() {
         paintTransport();
-        paintModes();
         if (songAdapter != null) {
             Song current = engine.getCurrent();
             songAdapter.setPlayingId(current == null ? -1 : current.id);
@@ -1478,14 +1464,8 @@ public class MainActivity extends Activity implements PlayerEngine.Listener {
     private void openNowPlaying() {
         if (engine.getCurrent() != null) {
             startActivity(new Intent(MainActivity.this, NowPlayingActivity.class));
+            overridePendingTransition(R.anim.np_in, R.anim.np_hold);
         }
-    }
-
-    private void paintModes() {
-        btnShuffle.setTextColor(engine.isShuffle() ? theme.accent : theme.textDim);
-        int repeat = engine.getRepeatMode();
-        btnRepeat.setText(repeat == PlayerEngine.REPEAT_ONE ? "↻1" : "↻");
-        btnRepeat.setTextColor(repeat == PlayerEngine.REPEAT_OFF ? theme.textDim : theme.accent);
     }
 
     private void updateProgress() {

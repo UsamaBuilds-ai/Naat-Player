@@ -104,7 +104,7 @@ public class SettingsActivity extends Activity {
                 });
 
         section("Appearance");
-        item("Theme", theme.label, new View.OnClickListener() {
+        item("Theme", "Pick a colour card", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 showThemeDialog();
@@ -145,6 +145,28 @@ public class SettingsActivity extends Activity {
             }
         });
 
+        section("Lyrics");
+        item("Lyrics language", Prefs.lyricsLanguageLabel(this), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLanguageDialog();
+            }
+        });
+        toggle("Online lyrics", "Fetch lyrics from LRCLIB and lyrics.ovh when missing",
+                Prefs.lyricsOnline(this), new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton button, boolean checked) {
+                        Prefs.setLyricsOnline(SettingsActivity.this, checked);
+                    }
+                });
+        toggle("Translate to Urdu", "When Urdu lyrics are missing, translate what was found",
+                Prefs.translateToUrdu(this), new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton button, boolean checked) {
+                        Prefs.setTranslateToUrdu(SettingsActivity.this, checked);
+                    }
+                });
+
         section("Backup");
         item("Export backup", "Save favourites, playlists, recent and hidden items", new View.OnClickListener() {
             @Override
@@ -167,8 +189,8 @@ public class SettingsActivity extends Activity {
                 });
 
         section("About");
-        item("Version", "Naat Player 1.9", null);
-        item("Lyrics", "Read from .lrc files or embedded USLT tags", null);
+        item("Version", "Naat Player 2.0", null);
+        item("Lyrics", "Local .lrc or embedded USLT first, online as a fallback", null);
     }
 
     private String sleepSummary() {
@@ -278,16 +300,31 @@ public class SettingsActivity extends Activity {
     // ------------------------------------------------------------- dialogs
 
     private void showThemeDialog() {
-        final Theme[] all = Theme.ALL;
-        String[] labels = new String[all.length];
-        for (int i = 0; i < all.length; i++) labels[i] = all[i].label;
-        new AlertDialog.Builder(this)
+        final AlertDialog[] holder = new AlertDialog[1];
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Theme")
-                .setItems(labels, new DialogInterface.OnClickListener() {
+                .setView(Ui.themeCards(this, theme, new Ui.ThemePick() {
+                    @Override
+                    public void onPick(Theme picked) {
+                        Theme.select(SettingsActivity.this, picked);
+                        if (holder[0] != null) holder[0].dismiss();
+                        recreate();
+                    }
+                }))
+                .create();
+        holder[0] = dialog;
+        dialog.show();
+    }
+
+    private void showLanguageDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Lyrics language")
+                .setItems(LyricsOnline.LANG_LABELS, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        Theme.select(SettingsActivity.this, all[which]);
-                        recreate();
+                        Prefs.setLyricsLanguage(SettingsActivity.this,
+                                LyricsOnline.LANG_CODES[which]);
+                        buildRows();
                     }
                 })
                 .show();

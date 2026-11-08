@@ -8,16 +8,16 @@ Ek **original, from-scratch** Android music/nait player (~4,600 lines Java, bina
 |---|---|
 | **Splash** | Brief animated Naat Player branding, phir library khulti hai |
 | **Library** | Tabs: Naats / Albums / Artists / Folders / Videos, live search, count pill, theme (◐), hide-eye (◉), settings (⚙) |
-| **Now Playing** | Bada album art, **animated equalizer visualizer**, title/artist/album, seek + timer, shuffle/repeat, lyrics, sleep timer, equalizer, **favourite (♥)**, **queue** |
+| **Now Playing** | CD-style rotating album art, title/artist/album, seek + timer, shuffle/repeat, **swipe-up lyric sheet**, sleep timer, **favourite (♥)**, **queue** |
 | **Video player** | Local videos with native Android playback controls (formats device codecs par depend karte hain) |
-| **Settings** | Scan library, Hidden music, show hidden items, dot-folders, theme, sort, equalizer, headphone pause, keep screen on, sleep timer, version, **export/import backup**, **clear recently played** |
+| **Settings** | Scan library, Hidden music, show hidden items, dot-folders, theme, sort, equalizer, **lyrics language / online / Urdu translate**, headphone pause, keep screen on, sleep timer, version, **export/import backup**, **clear recently played** |
 | **Hidden naats** | Hidden naats + hidden folders, dono ki alag tab, tap = unhide |
 | **Equalizer** | System 5-band EQ (audio session bound) + presets — settings save aur gaana badalne par apne aap lagte hain |
-| **Theme dialog** | 4 palettes: Sky blue (default), Midnight violet, Sunset, Emerald |
+| **Theme dialog** | 4 colour cards (Sky blue default, Midnight violet, Sunset, Emerald) — naam nahi, sirf rang |
 | **Queue** | Live play queue — tap to play, long-press to remove, clear all |
 | **Playlist** | Playlist details — play all, open/rename/delete playlist, remove naats |
 
-## Features (v1.9)
+## Features (v2.0)
 
 - MediaStore Naat library (`IS_MUSIC != 0`), album art via `MediaMetadataRetriever` + LRU cache
 - Search: Naat title / artist / album / folder name, plus video filename
@@ -28,12 +28,17 @@ Ek **original, from-scratch** Android music/nait player (~4,600 lines Java, bina
 - **Local video playback** Videos tab se Android ke native player controls ke saath, alag media permission
 - **Favourites (♥)**: Naat long-press → "Add to Favourites / Remove from Favourites"; heart chip library tabs par + heart button Now Playing par
 - Naat long-press actions: rename + confirmed delete (Android permission maang sakta hai media file change karne se pehle)
-- **Auto name** — file name audio title/artist se banata hai; user rename start karta hai, Android permission maang sakta hai
+- **Auto name** — file name audio title/artist se banata hai; user rename start karta hai, Android permission maang sakta hai; naam restart ke baad bhi waise hi dikhta hai
+- **Library quick modes** — search row mein **♥ My Favourite**, **◷ Recent**, **▤ Playlists**; alag chip row nahi
+- **CD-style art**: art hai to wo round CD ki tarah ghoomta hai (play par spin, pause par ruka); art nahi hai to themed disc + `♪` glyph; art screen-width resolution par load hota hai
+- **Theme chooser** ab sirf colour cards hai — naam nahi, sirf palette; selected card par accent border
+- **Swipe up / down**: mini-player ya Now Playing khulne/band hone par poora screen slide hota hai
 - **Hidden music** (original jaisa): Naat/poora folder long-press → Hide; header **◉ eye** button hidden items show/kare; Settings → Hidden naats list + Unhide; Show hidden items / Show dot-folders switches; hidden items library, search aur shuffle queue se nikal jate hain
 - **Playlists**: create / add / open / rename / delete; per-playlist screen "Play all"; MainActivity par chip playlist list le jaati hai
 - **Sort**: Naat name / date added / duration / album, ↑ ↓ (Settings → Sort naats)
 - Shuffle, Repeat off / all / one
-- **Lyrics**: sidecar `.lrc` (timestamped, auto-scroll + current line highlight) ya embedded ID3 `USLT` frame; kuch na ho to saaf message
+- **Lyrics**: swipe-up sheet (Naat play na ho tab tak message); order: `naat.<lang>.lrc` → `naat.lrc` → embedded ID3 `USLT` → cached online → online (**LRCLIB** primary, **lyrics.ovh** fallback); timestamped lines ka auto-scroll + highlight; kuch na mile to saaf message; Urdu default language, machine translation **sirf Urdu ke liye**
+- **Lyrics language**: Settings → Lyrics language (Urdu, Hindi, English, Punjabi, Sindhi, Pashto, Arabic, Auto) + Settings → Online lyrics / Translate to Urdu
 - **Sleep timer**: Off / "stop after this Naat" / 10 / 15 / 30 / 45 / 60 min (countdown chip)
 - **Equalizer**: 5 bands + presets, current playback session se bandha
 - **4 themes** runtime repaint (gradients code se bante hain → instant switch)
@@ -52,13 +57,13 @@ Lokal build (Windows PowerShell, Android SDK + JDK 17+ chahiye):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
-adb install -r NaatPlayer-1.9.apk
+adb install -r NaatPlayer-2.0.apk
 ```
 
 Version override karne ke liye:
 
 ```powershell
-$env:VERSION_NAME="1.9.0"; $env:VERSION_CODE="10900"
+$env:VERSION_NAME="2.0.0"; $env:VERSION_CODE="20000"
 powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 ```
 
@@ -76,8 +81,8 @@ Do workflows hain:
 Release nikalne ka tareeqa:
 
 ```powershell
-git tag v1.9.0
-git push origin v1.9.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 Ya GitHub → Actions → **Release - Signed APK** → *Run workflow* (version `1.9.0` dein).
@@ -133,7 +138,14 @@ build.ps1                 # aapt2 + javac + d8 + zipalign + apksigner (no Gradle
 
 - Background playback foreground service (`mediaPlayback`) + media notification se chalta hai.
 - Equalizer device par available na ho to screen message dikhti hai (crash nahi).
-- Lyrics sirf local `.lrc` / embedded tag se — internet se fetch nahi karta (privacy).
+- Online lyrics **LRCLIB** (no key, no rate limit) aur **lyrics.ovh** se — naat lyrics coverage limited hai, is liye local `.lrc` / embedded tag ab bhi sab se reliable hai. Machine translation (MyMemory free API, ~5000 chars/day anonymous) sirf Urdu ke liye, best-effort; poetry ka exact translation na mile to machine output se kaam chalana hoga.
+
+## Credits
+
+- **LRCLIB** (https://lrclib.net) — open lyrics database, MIT license (https://github.com/tranxuanthang/lrclib). Online lyrics primary source.
+- **Circle-clip + rotation CD-art technique** — reimplemented in `DiscArtView.java` after André Mion's **Music-Cover-View** (Apache License 2.0, https://github.com/andremion/Music-Cover-View). No verbatim code was copied.
+- **CircleImageView** — hdodenhof (Apache License 2.0), circle-crop reference.
+- **QuickLyric / SongSync / FastLyrics** — GPL-3.0; used as behaviour reference only, not copied.
 
 ## License
 

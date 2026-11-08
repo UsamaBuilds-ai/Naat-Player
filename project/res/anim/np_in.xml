@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Now Playing slides up from the bottom of the screen. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shareInterpolator="true">
+
+    <translate
+        android:duration="280"
+        android:fromYDelta="22%p"
+        android:interpolator="@android:interpolator/decelerate_cubic"
+        android:toYDelta="0" />
+
+    <alpha
+        android:duration="200"
+        android:fromAlpha="0.0"
+        android:toAlpha="1.0" />
+</set>
